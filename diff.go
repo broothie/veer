@@ -7,7 +7,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/go-git/go-billy/v5/osfs"
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
 	"github.com/pmezard/go-difflib/difflib"
 )
 
@@ -60,6 +62,16 @@ func fetchDiff(args []string) (*DiffResult, error) {
 		return result, err
 	}
 
+	// Load global and system gitignore patterns — go-git doesn't do this automatically.
+	// These functions expect a filesystem rooted at /, not the worktree.
+	rootFS := osfs.New("/")
+	if global, err := gitignore.LoadGlobalPatterns(rootFS); err == nil {
+		wt.Excludes = append(wt.Excludes, global...)
+	}
+	if system, err := gitignore.LoadSystemPatterns(rootFS); err == nil {
+		wt.Excludes = append(wt.Excludes, system...)
+	}
+
 	status, err := wt.Status()
 	if err != nil {
 		return result, err
@@ -69,7 +81,7 @@ func fetchDiff(args []string) (*DiffResult, error) {
 
 	var paths []string
 	for path, fs := range status {
-		if fs.Worktree == git.Unmodified || fs.Worktree == git.Untracked {
+		if fs.Worktree == git.Unmodified && fs.Staging == git.Unmodified {
 			continue
 		}
 		if !matchesFilters(path, pathFilters) {
