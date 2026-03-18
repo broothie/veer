@@ -3,6 +3,9 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"runtime/debug"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -11,6 +14,15 @@ import (
 )
 
 var version = "dev"
+var readBuildInfo = debug.ReadBuildInfo
+var runGit = func(args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
 
 type config struct {
 	Interval     time.Duration    `short:"n" default:"250ms" help:"Refresh interval (fallback when file watcher is active)."`
@@ -36,7 +48,7 @@ func main() {
 	kong.Parse(&cfg,
 		kong.Name("veer"),
 		kong.Description("A live-diffing TUI for coding with AI."),
-		kong.Vars{"version": version},
+		kong.Vars{"version": currentVersion()},
 		kong.UsageOnError(),
 	)
 
@@ -62,4 +74,58 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+func currentVersion() string {
+	if version != "" && version != "dev" {
+		return version
+	}
+
+	info, ok := readBuildInfo()
+	if !ok {
+		return gitVersion()
+	}
+
+	if info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+
+	var revision string
+	var modified bool
+	for _, setting := range info.Settings {
+		switch setting.Key {
+		case "vcs.revision":
+			revision = setting.Value
+		case "vcs.modified":
+			modified = setting.Value == "true"
+		}
+	}
+
+	if revision == "" {
+		return gitVersion()
+	}
+	if len(revision) > 7 {
+		revision = revision[:7]
+	}
+	if modified {
+		return revision + "-dirty"
+	}
+	return revision
+}
+
+func gitVersion() string {
+	revision, err := runGit("rev-parse", "--short", "HEAD")
+	if err != nil || revision == "" {
+		return version
+	}
+
+	modified := false
+	if _, err := runGit("diff", "--quiet", "HEAD", "--"); err != nil {
+		// git diff --quiet exits non-zero when the worktree is dirty.
+		modified = true
+	}
+	if modified {
+		return revision + "-dirty"
+	}
+	return revision
 }
