@@ -429,7 +429,7 @@ func TestRenderDiffLine_AllTypes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := renderDiffLine(tt.dl, 3)
+			result := renderDiffLine(tt.dl, 3, highlightedLine{})
 			if !strings.Contains(result, tt.want) {
 				t.Errorf("renderDiffLine(%s) = %q, should contain %q", tt.name, result, tt.want)
 			}
