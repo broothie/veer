@@ -31,7 +31,8 @@ var (
 	styleSHA     = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
 	styleDir     = lipgloss.NewStyle().Faint(true)
 	styleStaged  = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
-	styleHeader  = lipgloss.NewStyle().Faint(true)
+	styleHeader   = lipgloss.NewStyle().Faint(true)
+	styleFilePath = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")).Background(lipgloss.Color("237"))
 
 	styleSidebar = lipgloss.NewStyle().
 			BorderRight(true).
@@ -64,8 +65,9 @@ type model struct {
 	height         int
 	err            error
 	fetching       bool
-	diffGen        uint64 // incremented when files or cursor change
+	diffGen        uint64 // incremented when files change
 	lastBuiltGen   uint64 // gen when diff content was last built
+	fileOffsets    []int  // line offset where each file starts in the viewport
 }
 
 func newModel(args []string) model {
@@ -124,29 +126,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sha = msg.result.SHA
 			m.message = msg.result.Message
 
-			prevPath := ""
-			if m.cursor < len(m.files) {
-				prevPath = m.files[m.cursor].Path
-			}
+			prevYOffset := m.viewport.YOffset
 
 			m.files = msg.result.Files
 			m.tree = buildTree(m.files)
 
-			found := false
-			if prevPath != "" {
-				for i, f := range m.files {
-					if f.Path == prevPath {
-						m.cursor = i
-						found = true
-						break
-					}
-				}
-			}
-			if !found && m.cursor >= len(m.files) {
-				m.cursor = max(0, len(m.files)-1)
-			}
 			m.diffGen++
 			m.rebuildDiffContent()
+
+			// Restore scroll position and sync cursor.
+			m.viewport.SetYOffset(prevYOffset)
+			m.syncCursorToScroll()
 		}
 
 	case tea.KeyMsg:
@@ -163,15 +153,30 @@ func (m model) mainHeight() int {
 	return max(1, m.height-headerHeight-statusHeight)
 }
 
-// setCursor moves the file cursor and resets the diff viewport.
+// setCursor moves the file cursor and scrolls the viewport to that file.
 func (m *model) setCursor(idx int) {
 	if idx < 0 || idx >= len(m.files) || idx == m.cursor {
 		return
 	}
 	m.cursor = idx
-	m.diffGen++
-	m.rebuildDiffContent()
-	m.viewport.GotoTop()
+	if idx < len(m.fileOffsets) {
+		m.viewport.SetYOffset(m.fileOffsets[idx])
+	}
+}
+
+// syncCursorToScroll updates the sidebar cursor to match the current scroll position.
+func (m *model) syncCursorToScroll() {
+	if len(m.fileOffsets) == 0 {
+		return
+	}
+	yOff := m.viewport.YOffset
+	for i := len(m.fileOffsets) - 1; i >= 0; i-- {
+		if yOff >= m.fileOffsets[i] {
+			m.cursor = i
+			return
+		}
+	}
+	m.cursor = 0
 }
 
 // rebuildDiffContent rebuilds viewport content only if the generation changed.
@@ -198,6 +203,7 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.setCursor(m.cursor + 1)
 		} else {
 			m.viewport.LineDown(1)
+			m.syncCursorToScroll()
 		}
 
 	case "k", "up":
@@ -205,6 +211,7 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.setCursor(m.cursor - 1)
 		} else {
 			m.viewport.LineUp(1)
+			m.syncCursorToScroll()
 		}
 
 	case "g":
@@ -212,6 +219,7 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.setCursor(0)
 		} else {
 			m.viewport.GotoTop()
+			m.syncCursorToScroll()
 		}
 
 	case "G":
@@ -219,26 +227,31 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.setCursor(len(m.files) - 1)
 		} else {
 			m.viewport.GotoBottom()
+			m.syncCursorToScroll()
 		}
 
 	case "ctrl+d":
 		if !m.sidebarFocused {
 			m.viewport.HalfViewDown()
+			m.syncCursorToScroll()
 		}
 
 	case "ctrl+u":
 		if !m.sidebarFocused {
 			m.viewport.HalfViewUp()
+			m.syncCursorToScroll()
 		}
 
 	case "ctrl+f":
 		if !m.sidebarFocused {
 			m.viewport.ViewDown()
+			m.syncCursorToScroll()
 		}
 
 	case "ctrl+b":
 		if !m.sidebarFocused {
 			m.viewport.ViewUp()
+			m.syncCursorToScroll()
 		}
 
 	case "l", "enter":
@@ -283,6 +296,7 @@ func (m model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			}
 		} else {
 			m.viewport.LineUp(3)
+			m.syncCursorToScroll()
 		}
 
 	case tea.MouseButtonWheelDown:
@@ -293,6 +307,7 @@ func (m model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			}
 		} else {
 			m.viewport.LineDown(3)
+			m.syncCursorToScroll()
 		}
 	}
 

@@ -23,7 +23,8 @@ func testModel(files []FileDiff) model {
 		sha:            "abc1234",
 		message:        "test commit",
 	}
-	m.viewport.SetContent(m.buildDiffContent())
+	content := m.buildDiffContent()
+	m.viewport.SetContent(content)
 	return m
 }
 
@@ -172,11 +173,10 @@ func TestHandleKey_H_BackToSidebar(t *testing.T) {
 
 // --- Update: diffResultMsg ---
 
-func TestUpdate_DiffResult_PreservesCursor(t *testing.T) {
+func TestUpdate_DiffResult_SyncsFromScroll(t *testing.T) {
 	m := testModel(twoFiles)
-	m.cursor = 1 // on b.go
 
-	// Simulate a refresh that returns the same files.
+	// After a refresh, cursor should be synced from scroll position.
 	msg := diffResultMsg{
 		result: &DiffResult{
 			Branch:  "main",
@@ -189,8 +189,9 @@ func TestUpdate_DiffResult_PreservesCursor(t *testing.T) {
 	result, _ := m.Update(msg)
 	m = result.(model)
 
-	if m.cursor != 1 {
-		t.Errorf("cursor = %d, want 1 (should preserve position on b.go)", m.cursor)
+	// At YOffset 0, cursor should be 0 (first file).
+	if m.cursor != 0 {
+		t.Errorf("cursor = %d, want 0 (synced from top scroll position)", m.cursor)
 	}
 }
 
@@ -344,12 +345,14 @@ func TestBuildDiffContent_RendersDiff(t *testing.T) {
 	}
 }
 
-func TestBuildDiffContent_CursorOutOfRange(t *testing.T) {
+func TestBuildDiffContent_AllFilesRendered(t *testing.T) {
 	m := testModel(twoFiles)
-	m.cursor = 99
 	content := m.buildDiffContent()
-	if content != "" {
-		t.Error("out-of-range cursor should return empty string")
+	if !strings.Contains(content, "a.go") || !strings.Contains(content, "b.go") {
+		t.Error("continuous scroll should render all files")
+	}
+	if !strings.Contains(content, "pkg a") || !strings.Contains(content, "pkg b") {
+		t.Error("continuous scroll should render all file contents")
 	}
 }
 

@@ -52,5 +52,6 @@ Mouse: click to select files, scroll wheel to navigate or scroll.
 - [x] Thicker sidebars
 - [ ] Collapsible sidebar
 - [x] Scrollbar
-- [ ] Continuous scroll
+- [x] Continuous scroll
 - [x] Refactor everything
+- [ ] Expandable ellipsis

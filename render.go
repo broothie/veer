@@ -77,10 +77,11 @@ func (m model) renderHeader() string {
 	return " " + line + "\n"
 }
 
-func (m model) buildDiffContent() string {
+func (m *model) buildDiffContent() string {
 	if len(m.files) == 0 {
 		vpWidth := max(1, m.width-sidebarWidth-sidebarPad-1-1) // -1 for scrollbar
 		vpHeight := m.mainHeight()
+		m.fileOffsets = nil
 		return lipgloss.NewStyle().
 			Width(vpWidth).
 			Height(vpHeight).
@@ -88,28 +89,57 @@ func (m model) buildDiffContent() string {
 			Render(styleFaint.Render("no changes"))
 	}
 
-	if m.cursor >= len(m.files) {
-		return ""
-	}
-
-	f := m.files[m.cursor]
-	if len(f.Lines) == 0 {
-		return ""
-	}
-
-	// Determine line number column width from the largest line number.
-	maxNum := 0
-	for _, dl := range f.Lines {
-		maxNum = max(maxNum, dl.OldNum)
-		maxNum = max(maxNum, dl.NewNum)
-	}
-	numWidth := max(3, len(fmt.Sprint(maxNum)))
-
 	var sb strings.Builder
-	for _, dl := range f.Lines {
-		sb.WriteString(renderDiffLine(dl, numWidth))
+	m.fileOffsets = make([]int, len(m.files))
+	lineNum := 0
+
+	for i, f := range m.files {
+		m.fileOffsets[i] = lineNum
+
+		if len(f.Lines) == 0 {
+			continue
+		}
+
+		// File path header — full-width bar with delta and status.
+		if i > 0 {
+			sb.WriteByte('\n')
+			lineNum++
+		}
+		vpWidth := max(1, m.width-sidebarWidth-sidebarPad-1-1)
+
+		left := " " + f.Path
+
+		var statusStr string
+		switch {
+		case f.Staged && f.Unstaged:
+			statusStr = "SM"
+		case f.Staged:
+			statusStr = "S"
+		default:
+			statusStr = "M"
+		}
+		right := fmt.Sprintf("+%d -%d %s ", f.Added, f.Removed, statusStr)
+
+		gap := max(1, vpWidth-lipgloss.Width(left)-lipgloss.Width(right))
+		sb.WriteString(styleFilePath.Render(left + strings.Repeat(" ", gap) + right))
 		sb.WriteByte('\n')
+		lineNum++
+
+		// Determine line number column width for this file.
+		maxNum := 0
+		for _, dl := range f.Lines {
+			maxNum = max(maxNum, dl.OldNum)
+			maxNum = max(maxNum, dl.NewNum)
+		}
+		numWidth := max(3, len(fmt.Sprint(maxNum)))
+
+		for _, dl := range f.Lines {
+			sb.WriteString(renderDiffLine(dl, numWidth))
+			sb.WriteByte('\n')
+			lineNum++
+		}
 	}
+
 	return sb.String()
 }
 
