@@ -14,15 +14,15 @@ const (
 	defaultSidebarWidth = 35
 	minSidebarWidth     = 15
 	maxSidebarWidth     = 80
-	sidebarPad   = 1
-	headerHeight = 2 // header line + blank line
+	sidebarPad          = 1
+	headerHeight        = 2 // header line + blank line
 	statusHeight        = 2 // blank line + status line
 )
 
 type focusArea int
 
 const (
-	focusFiles   focusArea = iota
+	focusFiles focusArea = iota
 	focusCommits
 	focusDiff
 )
@@ -80,9 +80,9 @@ type model struct {
 	lastBuiltGen   uint64 // gen when diff content was last built
 	fileOffsets    []int  // line offset where each file starts in the viewport
 	commits        []CommitInfo
-	commitCursor   int    // 0 = "working tree", 1+ = commits[i-1]
+	commitCursor   int // 0 = "working tree", 1+ = commits[i-1]
 	commitOffset   int
-	selectedCommit int    // -1 = working tree, 0+ = index into commits
+	selectedCommit int // -1 = working tree, 0+ = index into commits
 }
 
 func newModel(cfg config) model {
@@ -259,117 +259,122 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
-
 	case "tab":
-		switch m.focus {
-		case focusFiles:
-			if len(m.commits) > 0 {
-				m.focus = focusCommits
-			} else if len(m.files) > 0 {
-				m.focus = focusDiff
-			}
-		case focusCommits:
-			if len(m.files) > 0 {
-				m.focus = focusDiff
-			} else {
-				m.focus = focusFiles
-			}
-		case focusDiff:
-			m.focus = focusFiles
-		}
-
+		m.cycleTab()
 	case "j", "down":
-		switch m.focus {
-		case focusFiles:
-			m.setCursor(m.cursor + 1)
-		case focusCommits:
-			total := len(m.commits) + 1 // +1 for working tree entry
-			if m.commitCursor < total-1 {
-				m.commitCursor++
-			}
-		case focusDiff:
-			m.viewport.LineDown(1)
-			m.syncCursorToScroll()
-		}
-
+		m.keyDown()
 	case "k", "up":
-		switch m.focus {
-		case focusFiles:
-			m.setCursor(m.cursor - 1)
-		case focusCommits:
-			if m.commitCursor > 0 {
-				m.commitCursor--
-			}
-		case focusDiff:
-			m.viewport.LineUp(1)
-			m.syncCursorToScroll()
-		}
-
+		m.keyUp()
 	case "g":
-		switch m.focus {
-		case focusFiles:
-			m.setCursor(0)
-		case focusCommits:
-			m.commitCursor = 0
-		case focusDiff:
-			m.viewport.GotoTop()
-			m.syncCursorToScroll()
-		}
-
+		m.keyTop()
 	case "G":
-		switch m.focus {
-		case focusFiles:
-			m.setCursor(len(m.files) - 1)
-		case focusCommits:
-			m.commitCursor = len(m.commits) // last entry (commits[len-1])
-		case focusDiff:
-			m.viewport.GotoBottom()
-			m.syncCursorToScroll()
-		}
-
+		m.keyBottom()
 	case "ctrl+d":
-		if m.focus == focusDiff {
-			m.viewport.HalfViewDown()
-			m.syncCursorToScroll()
-		}
-
+		m.diffScroll(func(v *viewport.Model) { v.HalfViewDown() })
 	case "ctrl+u":
-		if m.focus == focusDiff {
-			m.viewport.HalfViewUp()
-			m.syncCursorToScroll()
-		}
-
+		m.diffScroll(func(v *viewport.Model) { v.HalfViewUp() })
 	case "ctrl+f":
-		if m.focus == focusDiff {
-			m.viewport.ViewDown()
-			m.syncCursorToScroll()
-		}
-
+		m.diffScroll(func(v *viewport.Model) { v.ViewDown() })
 	case "ctrl+b":
-		if m.focus == focusDiff {
-			m.viewport.ViewUp()
-			m.syncCursorToScroll()
-		}
-
+		m.diffScroll(func(v *viewport.Model) { v.ViewUp() })
 	case "l", "enter":
-		switch m.focus {
-		case focusFiles:
-			if len(m.files) > 0 {
-				m.focus = focusDiff
-			}
-		case focusCommits:
-			return m.selectCommit()
-		}
-
+		return m.keyOpen()
 	case "h":
-		switch m.focus {
-		case focusDiff:
-			m.focus = focusFiles
-		case focusCommits:
+		if m.focus == focusDiff || m.focus == focusCommits {
 			m.focus = focusFiles
 		}
 	}
+	return m, nil
+}
 
+func (m *model) cycleTab() {
+	switch m.focus {
+	case focusFiles:
+		if len(m.commits) > 0 {
+			m.focus = focusCommits
+		} else if len(m.files) > 0 {
+			m.focus = focusDiff
+		}
+	case focusCommits:
+		if len(m.files) > 0 {
+			m.focus = focusDiff
+		} else {
+			m.focus = focusFiles
+		}
+	case focusDiff:
+		m.focus = focusFiles
+	}
+}
+
+func (m *model) keyDown() {
+	switch m.focus {
+	case focusFiles:
+		m.setCursor(m.cursor + 1)
+	case focusCommits:
+		total := len(m.commits) + 1
+		if m.commitCursor < total-1 {
+			m.commitCursor++
+		}
+	case focusDiff:
+		m.viewport.LineDown(1)
+		m.syncCursorToScroll()
+	}
+}
+
+func (m *model) keyUp() {
+	switch m.focus {
+	case focusFiles:
+		m.setCursor(m.cursor - 1)
+	case focusCommits:
+		if m.commitCursor > 0 {
+			m.commitCursor--
+		}
+	case focusDiff:
+		m.viewport.LineUp(1)
+		m.syncCursorToScroll()
+	}
+}
+
+func (m *model) keyTop() {
+	switch m.focus {
+	case focusFiles:
+		m.setCursor(0)
+	case focusCommits:
+		m.commitCursor = 0
+	case focusDiff:
+		m.viewport.GotoTop()
+		m.syncCursorToScroll()
+	}
+}
+
+func (m *model) keyBottom() {
+	switch m.focus {
+	case focusFiles:
+		m.setCursor(len(m.files) - 1)
+	case focusCommits:
+		m.commitCursor = len(m.commits)
+	case focusDiff:
+		m.viewport.GotoBottom()
+		m.syncCursorToScroll()
+	}
+}
+
+func (m *model) diffScroll(fn func(*viewport.Model)) {
+	if m.focus == focusDiff {
+		fn(&m.viewport)
+		m.syncCursorToScroll()
+	}
+}
+
+func (m model) keyOpen() (tea.Model, tea.Cmd) {
+	switch m.focus {
+	case focusFiles:
+		if len(m.files) > 0 {
+			m.focus = focusDiff
+		}
+	case focusCommits:
+		return m.selectCommit()
+	}
 	return m, nil
 }
 
@@ -404,116 +409,141 @@ func (m model) sidebarBorderX() int {
 }
 
 func (m model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	borderX := m.sidebarBorderX()
-	_, commitStart := m.sidebarSplit()
-
 	switch msg.Button {
 	case tea.MouseButtonLeft:
-		switch msg.Action {
-		case tea.MouseActionPress:
-			// Start drag if clicking near the border (±1 column).
-			if msg.X >= borderX-1 && msg.X <= borderX+1 {
-				m.dragging = true
-				return m, nil
-			}
-
-			inSidebar := msg.X <= borderX
-			if inSidebar {
-				row := msg.Y - headerHeight
-				if row >= commitStart {
-					// Click in commit list area (skip branch header row).
-					header := 0
-					if m.branch != "" || m.sha != "" {
-						header = 1
-					}
-					commitRow := m.commitOffset + (row - commitStart - header)
-					total := len(m.commits) + 1
-					if commitRow >= 0 && commitRow < total {
-						m.commitCursor = commitRow
-						m.focus = focusCommits
-						return m.selectCommit()
-					}
-				} else {
-					// Click in file tree area.
-					treeRow := m.sidebarOffset + row
-					if treeRow >= 0 && treeRow < len(m.tree) {
-						entry := m.tree[treeRow]
-						if entry.fileIdx >= 0 {
-							m.setCursor(entry.fileIdx)
-							m.focus = focusDiff
-						}
-					}
-				}
-			} else {
-				m.focus = focusDiff
-			}
-
-		case tea.MouseActionMotion:
-			if m.dragging {
-				newWidth := max(minSidebarWidth, min(maxSidebarWidth, msg.X-sidebarPad))
-				if newWidth != m.sidebarWidth {
-					m.sidebarWidth = newWidth
-					m.recalcLayout()
-				}
-			}
-
-		case tea.MouseActionRelease:
-			m.dragging = false
-		}
-
+		return m.handleMouseLeft(msg)
 	case tea.MouseButtonNone:
-		// Motion with no button — handle drag release.
 		if msg.Action == tea.MouseActionRelease {
 			m.dragging = false
 		}
-
 	case tea.MouseButtonWheelUp:
-		inSidebar := msg.X <= borderX
-		if inSidebar {
-			row := msg.Y - headerHeight
-			if row >= commitStart {
-				if m.commitOffset > 0 {
-					m.commitOffset--
-				}
-			} else {
-				if m.sidebarOffset > 0 {
-					m.sidebarOffset--
-				}
+		m.handleMouseScroll(msg, -1)
+	case tea.MouseButtonWheelDown:
+		m.handleMouseScroll(msg, 1)
+	}
+	return m, nil
+}
+
+func (m model) handleMouseLeft(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	borderX := m.sidebarBorderX()
+
+	switch msg.Action {
+	case tea.MouseActionPress:
+		if msg.X >= borderX-1 && msg.X <= borderX+1 {
+			m.dragging = true
+			return m, nil
+		}
+		return m.handleMouseClick(msg, borderX)
+
+	case tea.MouseActionMotion:
+		if m.dragging {
+			newWidth := max(minSidebarWidth, min(maxSidebarWidth, msg.X-sidebarPad))
+			if newWidth != m.sidebarWidth {
+				m.sidebarWidth = newWidth
+				m.recalcLayout()
 			}
-		} else {
-			m.viewport.LineUp(3)
-			m.syncCursorToScroll()
 		}
 
-	case tea.MouseButtonWheelDown:
-		inSidebar := msg.X <= borderX
-		if inSidebar {
-			row := msg.Y - headerHeight
-			if row >= commitStart {
-				total := len(m.commits) + 1
-				commitH := m.commitListHeight()
-				header := 0
-				if m.branch != "" || m.sha != "" {
-					header = 1
-				}
-				maxOff := max(0, total-(commitH-header))
-				if m.commitOffset < maxOff {
-					m.commitOffset++
-				}
-			} else {
-				fileH, _ := m.sidebarSplit()
-				maxOffset := max(0, len(m.tree)-fileH)
-				if m.sidebarOffset < maxOffset {
-					m.sidebarOffset++
-				}
-			}
-		} else {
-			m.viewport.LineDown(3)
-			m.syncCursorToScroll()
-		}
+	case tea.MouseActionRelease:
+		m.dragging = false
+	}
+	return m, nil
+}
+
+func (m model) handleMouseClick(msg tea.MouseMsg, borderX int) (tea.Model, tea.Cmd) {
+	if msg.X > borderX {
+		m.focus = focusDiff
+		return m, nil
 	}
 
+	_, commitStart := m.sidebarSplit()
+	row := msg.Y - headerHeight
+
+	if row >= commitStart {
+		return m.handleCommitClick(row, commitStart)
+	}
+
+	// Click in file tree area.
+	treeRow := m.sidebarOffset + row
+	if treeRow >= 0 && treeRow < len(m.tree) {
+		entry := m.tree[treeRow]
+		if entry.fileIdx >= 0 {
+			m.setCursor(entry.fileIdx)
+			m.focus = focusDiff
+		}
+	}
 	return m, nil
+}
+
+func (m model) handleCommitClick(row, commitStart int) (tea.Model, tea.Cmd) {
+	header := m.branchHeaderRows()
+	commitRow := m.commitOffset + (row - commitStart - header)
+	total := len(m.commits) + 1
+	if commitRow >= 0 && commitRow < total {
+		m.commitCursor = commitRow
+		m.focus = focusCommits
+		return m.selectCommit()
+	}
+	return m, nil
+}
+
+func (m *model) handleMouseScroll(msg tea.MouseMsg, dir int) {
+	borderX := m.sidebarBorderX()
+	_, commitStart := m.sidebarSplit()
+
+	if msg.X > borderX {
+		if dir > 0 {
+			m.viewport.LineDown(3)
+		} else {
+			m.viewport.LineUp(3)
+		}
+		m.syncCursorToScroll()
+		return
+	}
+
+	row := msg.Y - headerHeight
+	if row >= commitStart {
+		m.scrollCommitList(dir)
+	} else {
+		m.scrollFileTree(dir)
+	}
+}
+
+func (m *model) scrollCommitList(dir int) {
+	if dir > 0 {
+		total := len(m.commits) + 1
+		commitH := m.commitListHeight()
+		header := m.branchHeaderRows()
+		maxOff := max(0, total-(commitH-header))
+		if m.commitOffset < maxOff {
+			m.commitOffset++
+		}
+	} else {
+		if m.commitOffset > 0 {
+			m.commitOffset--
+		}
+	}
+}
+
+func (m *model) scrollFileTree(dir int) {
+	if dir > 0 {
+		fileH, _ := m.sidebarSplit()
+		maxOffset := max(0, len(m.tree)-fileH)
+		if m.sidebarOffset < maxOffset {
+			m.sidebarOffset++
+		}
+	} else {
+		if m.sidebarOffset > 0 {
+			m.sidebarOffset--
+		}
+	}
+}
+
+func (m model) branchHeaderRows() int {
+	if m.branch != "" || m.sha != "" {
+		return 1
+	}
+	return 0
 }
 
 // sidebarSplit returns (fileTreeHeight, commitListStartRow).
@@ -531,11 +561,7 @@ func (m model) sidebarSplit() (int, int) {
 func (m model) commitListHeight() int {
 	mainH := m.mainHeight()
 	total := len(m.commits) + 1 // +1 for working tree entry
-	header := 0
-	if m.branch != "" || m.sha != "" {
-		header = 1
-	}
-	h := min(total+header, mainH/3)
+	h := min(total+m.branchHeaderRows(), mainH/3)
 	return max(h, 3) // at least 3 rows
 }
 
@@ -560,11 +586,7 @@ func (m model) View() string {
 
 	// Keep commit cursor visible.
 	commitH := m.commitListHeight()
-	branchHeader := 0
-	if m.branch != "" || m.sha != "" {
-		branchHeader = 1
-	}
-	visibleCommits := commitH - branchHeader
+	visibleCommits := commitH - m.branchHeaderRows()
 	if m.commitCursor < m.commitOffset {
 		m.commitOffset = m.commitCursor
 	} else if m.commitCursor >= m.commitOffset+visibleCommits {

@@ -13,14 +13,14 @@ import (
 var version = "dev"
 
 type config struct {
-	Interval     time.Duration `short:"n" default:"250ms" help:"Refresh interval."`
-	SidebarWidth int           `short:"w" name:"sidebar-width" default:"35" help:"Initial sidebar width."`
-	Context      int           `short:"U" default:"3" help:"Number of context lines in diff."`
-	Staged       bool          `short:"s" help:"Show only staged changes."`
-	Unstaged     bool          `short:"u" help:"Show only unstaged changes."`
+	Interval     time.Duration    `short:"n" default:"250ms" help:"Refresh interval."`
+	SidebarWidth int              `short:"w" name:"sidebar-width" default:"35" help:"Initial sidebar width."`
+	Context      int              `short:"U" default:"3" help:"Number of context lines in diff."`
+	Staged       bool             `short:"s" help:"Show only staged changes."`
+	Unstaged     bool             `short:"u" help:"Show only unstaged changes."`
 	Version      kong.VersionFlag `short:"v" help:"Print version."`
-	Ref          string        `arg:"" optional:"" help:"Diff working tree against this ref (branch, tag, SHA)."`
-	Paths        []string      `arg:"" optional:"" help:"Filter to specific paths."`
+	Ref          string           `arg:"" optional:"" help:"Diff working tree against this ref (branch, tag, SHA)."`
+	Paths        []string         `arg:"" optional:"" help:"Filter to specific paths."`
 }
 
 func main() {
