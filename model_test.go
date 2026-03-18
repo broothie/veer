@@ -324,7 +324,7 @@ func TestRenderHeader_TruncatesLongMessage(t *testing.T) {
 	m.message = "this is a very long commit message that should be truncated"
 
 	header := m.renderHeader()
-	if lipgloss.Width(header) > m.width+1 { // +1 for trailing newline
+	if lipgloss.Width(header) > m.width {
 		t.Errorf("header width %d exceeds terminal width %d", lipgloss.Width(header), m.width)
 	}
 }
@@ -340,15 +340,15 @@ func TestRenderHeader_NoMessage(t *testing.T) {
 
 // --- renderStatus ---
 
-func TestRenderStatus_WithFiles(t *testing.T) {
+func TestRenderHeader_WithFilesDelta(t *testing.T) {
 	m := testModel(twoFiles)
-	status := m.renderStatus()
+	header := m.renderHeader()
 
-	if !strings.Contains(status, "2 files") {
-		t.Error("status should show file count")
+	if !strings.Contains(header, "+2") {
+		t.Error("header should show additions")
 	}
-	if !strings.Contains(status, "1/2") {
-		t.Error("status should show cursor position")
+	if !strings.Contains(header, "-0") {
+		t.Error("header should show removals")
 	}
 }
 
@@ -367,7 +367,7 @@ func TestRenderStatus_FocusHints(t *testing.T) {
 
 	m.focus = focusFiles
 	status := m.renderStatus()
-	if !strings.Contains(status, "enter/l: open") {
+	if !strings.Contains(status, "enter: open") {
 		t.Error("file-focused status should show file hints")
 	}
 
@@ -510,8 +510,8 @@ func TestRenderTreeEntry_SelectedFile(t *testing.T) {
 
 	entry := treeEntry{name: "a.go", fileIdx: 0, depth: 0}
 	result := m.renderTreeEntry(entry)
-	if !strings.Contains(result, ">") {
-		t.Error("selected file should have > prefix")
+	if !strings.Contains(result, "●") {
+		t.Error("selected file should have ● marker")
 	}
 	if !strings.Contains(result, "a.go") {
 		t.Error("selected file should contain filename")
@@ -524,8 +524,8 @@ func TestRenderTreeEntry_UnselectedFile(t *testing.T) {
 
 	entry := treeEntry{name: "b.go", fileIdx: 1, depth: 0}
 	result := m.renderTreeEntry(entry)
-	if strings.Contains(result, ">") {
-		t.Error("unselected file should not have > prefix")
+	if !strings.Contains(result, "○") {
+		t.Error("unselected file should have ○ marker")
 	}
 }
 

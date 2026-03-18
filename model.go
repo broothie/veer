@@ -15,8 +15,8 @@ const (
 	minSidebarWidth     = 15
 	maxSidebarWidth     = 80
 	sidebarPad          = 1
-	headerHeight        = 2 // header line + blank line
-	statusHeight        = 2 // blank line + status line
+	headerHeight        = 1 // header bar
+	statusHeight        = 1 // status bar
 )
 
 type focusArea int
@@ -202,7 +202,7 @@ func (m model) mainHeight() int {
 }
 
 func (m model) vpWidth() int {
-	return max(1, m.width-m.sidebarWidth-sidebarPad-1-1) // -1 border, -1 scrollbar
+	return max(1, m.width-m.sidebarWidth-sidebarPad-3) // -1 sidebar scrollbar, -1 border, -1 diff scrollbar
 }
 
 func (m *model) recalcLayout() {
@@ -264,18 +264,18 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "shift+tab":
 		m.cycleTab(-1)
 	case "j", "down":
-		m.keyDown()
+		return m, m.keyDown()
 	case "k", "up":
-		m.keyUp()
+		return m, m.keyUp()
 	case "g":
-		m.keyTop()
+		return m, m.keyTop()
 	case "G":
-		m.keyBottom()
+		return m, m.keyBottom()
 	case "ctrl+f":
 		m.diffScroll(func(v *viewport.Model) { v.ViewDown() })
 	case "ctrl+b":
 		m.diffScroll(func(v *viewport.Model) { v.ViewUp() })
-	case "l", "enter":
+	case "enter":
 		return m.keyOpen()
 	}
 	return m, nil
@@ -325,7 +325,7 @@ func (m *model) cycleTab(dir int) {
 	}
 }
 
-func (m *model) keyDown() {
+func (m *model) keyDown() tea.Cmd {
 	switch m.focus {
 	case focusFiles:
 		m.setCursor(m.cursor + 1)
@@ -333,49 +333,57 @@ func (m *model) keyDown() {
 		total := len(m.commits) + 1
 		if m.commitCursor < total-1 {
 			m.commitCursor++
+			return m.applyCommitCursor()
 		}
 	case focusDiff:
 		m.viewport.LineDown(1)
 		m.syncCursorToScroll()
 	}
+	return nil
 }
 
-func (m *model) keyUp() {
+func (m *model) keyUp() tea.Cmd {
 	switch m.focus {
 	case focusFiles:
 		m.setCursor(m.cursor - 1)
 	case focusCommits:
 		if m.commitCursor > 0 {
 			m.commitCursor--
+			return m.applyCommitCursor()
 		}
 	case focusDiff:
 		m.viewport.LineUp(1)
 		m.syncCursorToScroll()
 	}
+	return nil
 }
 
-func (m *model) keyTop() {
+func (m *model) keyTop() tea.Cmd {
 	switch m.focus {
 	case focusFiles:
 		m.setCursor(0)
 	case focusCommits:
 		m.commitCursor = 0
+		return m.applyCommitCursor()
 	case focusDiff:
 		m.viewport.GotoTop()
 		m.syncCursorToScroll()
 	}
+	return nil
 }
 
-func (m *model) keyBottom() {
+func (m *model) keyBottom() tea.Cmd {
 	switch m.focus {
 	case focusFiles:
 		m.setCursor(len(m.files) - 1)
 	case focusCommits:
 		m.commitCursor = len(m.commits)
+		return m.applyCommitCursor()
 	case focusDiff:
 		m.viewport.GotoBottom()
 		m.syncCursorToScroll()
 	}
+	return nil
 }
 
 func (m *model) diffScroll(fn func(*viewport.Model)) {
@@ -395,6 +403,27 @@ func (m model) keyOpen() (tea.Model, tea.Cmd) {
 		return m.selectCommit()
 	}
 	return m, nil
+}
+
+// applyCommitCursor loads the diff for the current commit cursor position immediately,
+// without changing focus. Used for instant preview during j/k/scroll navigation.
+func (m *model) applyCommitCursor() tea.Cmd {
+	if m.commitCursor == 0 {
+		if m.selectedCommit != -1 {
+			m.selectedCommit = -1
+		}
+		return nil
+	}
+	idx := m.commitCursor - 1
+	if idx >= len(m.commits) {
+		return nil
+	}
+	c := m.commits[idx]
+	m.selectedCommit = idx
+	m.branch = ""
+	m.sha = c.SHA
+	m.message = c.Message
+	return commitDiffCmd(c.FullSHA)
 }
 
 // selectCommit handles enter in the commit list.
@@ -436,9 +465,9 @@ func (m model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			m.dragging = false
 		}
 	case tea.MouseButtonWheelUp:
-		m.handleMouseScroll(msg, -1)
+		return m, m.handleMouseScroll(msg, -1)
 	case tea.MouseButtonWheelDown:
-		m.handleMouseScroll(msg, 1)
+		return m, m.handleMouseScroll(msg, 1)
 	}
 	return m, nil
 }
@@ -506,7 +535,7 @@ func (m model) handleCommitClick(row, commitStart int) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *model) handleMouseScroll(msg tea.MouseMsg, dir int) {
+func (m *model) handleMouseScroll(msg tea.MouseMsg, dir int) tea.Cmd {
 	borderX := m.sidebarBorderX()
 	_, commitStart := m.sidebarSplit()
 
@@ -517,18 +546,18 @@ func (m *model) handleMouseScroll(msg tea.MouseMsg, dir int) {
 			m.viewport.LineUp(3)
 		}
 		m.syncCursorToScroll()
-		return
+		return nil
 	}
 
 	row := msg.Y - headerHeight
 	if row >= commitStart {
-		m.scrollCommitList(dir)
-	} else {
-		m.scrollFileTree(dir)
+		return m.scrollCommitList(dir)
 	}
+	m.scrollFileTree(dir)
+	return nil
 }
 
-func (m *model) scrollCommitList(dir int) {
+func (m *model) scrollCommitList(dir int) tea.Cmd {
 	total := len(m.commits) + 1
 	commitH := m.commitListHeight() - m.branchHeaderRows()
 	if dir > 0 {
@@ -543,6 +572,7 @@ func (m *model) scrollCommitList(dir int) {
 		}
 		m.commitOffset = max(0, m.commitOffset-1)
 	}
+	return m.applyCommitCursor()
 }
 
 func (m *model) scrollFileTree(dir int) {
@@ -565,11 +595,11 @@ func (m model) branchHeaderRows() int {
 func (m model) sidebarSplit() (int, int) {
 	mainH := m.mainHeight()
 	commitH := m.commitListHeight()
-	fileH := mainH - commitH - 1 // -1 for separator
+	fileH := mainH - commitH
 	if fileH < 1 {
 		fileH = 1
 	}
-	return fileH, fileH + 1 // +1 for separator line
+	return fileH, fileH
 }
 
 func (m model) commitListHeight() int {
@@ -623,15 +653,14 @@ func (m model) View() string {
 		sidebarScrollbar = renderScrollbar(mainH, len(m.tree), m.sidebarOffset)
 	}
 
-	parts := []string{sidebar}
-	if sidebarScrollbar != "" {
-		parts = append(parts, sidebarScrollbar)
+	border := renderBorder(mainH)
+	if sidebarScrollbar == "" {
+		sidebarScrollbar = renderEmptyColumn(mainH)
 	}
-	parts = append(parts, content)
-	if diffScrollbar != "" {
-		parts = append(parts, diffScrollbar)
+	if diffScrollbar == "" {
+		diffScrollbar = renderEmptyColumn(mainH)
 	}
-	main := lipgloss.JoinHorizontal(lipgloss.Top, parts...)
+	main := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, sidebarScrollbar, border, content, diffScrollbar)
 	status := m.renderStatus()
 
 	return lipgloss.JoinVertical(lipgloss.Left, header, main, status)
