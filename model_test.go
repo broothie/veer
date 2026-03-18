@@ -17,6 +17,7 @@ func testModel(files []FileDiff) model {
 		focus:          focusFiles,
 		width:          120,
 		height:         40,
+		sidebarWidth:   defaultSidebarWidth,
 		viewport:       viewport.New(80, 36),
 		cwd:            "~/proj",
 		branch:         "main",

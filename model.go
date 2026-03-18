@@ -11,11 +11,13 @@ import (
 )
 
 const (
-	sidebarWidth    = 30
-	sidebarPad      = 1
-	refreshInterval = 500 * time.Millisecond
-	headerHeight    = 2 // header line + blank line
-	statusHeight    = 2 // blank line + status line
+	defaultSidebarWidth = 30
+	minSidebarWidth     = 15
+	maxSidebarWidth     = 80
+	sidebarPad          = 1
+	refreshInterval     = 500 * time.Millisecond
+	headerHeight        = 2 // header line + blank line
+	statusHeight        = 2 // blank line + status line
 )
 
 type focusArea int
@@ -71,6 +73,8 @@ type model struct {
 	focus          focusArea
 	width          int
 	height         int
+	sidebarWidth   int
+	dragging       bool
 	err            error
 	fetching       bool
 	diffGen        uint64 // incremented when files change
@@ -91,6 +95,7 @@ func newModel(args []string) model {
 		gitArgs:        args,
 		focus:          focusFiles,
 		cwd:            cwd,
+		sidebarWidth:   defaultSidebarWidth,
 		selectedCommit: -1,
 	}
 }
@@ -131,10 +136,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		vpWidth := max(1, m.width-sidebarWidth-sidebarPad-1-1) // -1 for scrollbar
-		vpHeight := m.mainHeight()
-		m.viewport = viewport.New(vpWidth, vpHeight)
-		m.rebuildDiffContent()
+		m.recalcLayout()
 
 	case tickMsg:
 		if m.fetching {
@@ -192,6 +194,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) mainHeight() int {
 	return max(1, m.height-headerHeight-statusHeight)
+}
+
+func (m model) vpWidth() int {
+	return max(1, m.width-m.sidebarWidth-sidebarPad-1-1) // -1 border, -1 scrollbar
+}
+
+func (m *model) recalcLayout() {
+	prevYOffset := m.viewport.YOffset
+	m.viewport = viewport.New(m.vpWidth(), m.mainHeight())
+	m.diffGen++
+	m.lastBuiltGen = 0
+	m.rebuildDiffContent()
+	m.viewport.SetYOffset(prevYOffset)
+	m.syncCursorToScroll()
 }
 
 // setCursor moves the file cursor and scrolls the viewport to that file.
@@ -378,46 +394,76 @@ func (m model) selectCommit() (tea.Model, tea.Cmd) {
 	return m, commitDiffCmd(c.FullSHA)
 }
 
+func (m model) sidebarBorderX() int {
+	return m.sidebarWidth + sidebarPad
+}
+
 func (m model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	inSidebar := msg.X <= sidebarWidth+sidebarPad
+	borderX := m.sidebarBorderX()
 	_, commitStart := m.sidebarSplit()
 
 	switch msg.Button {
 	case tea.MouseButtonLeft:
-		if msg.Action != tea.MouseActionPress {
-			break
-		}
-		if inSidebar {
-			row := msg.Y - headerHeight
-			if row >= commitStart {
-				// Click in commit list area (skip branch header row).
-				header := 0
-				if m.branch != "" || m.sha != "" {
-					header = 1
-				}
-				commitRow := m.commitOffset + (row - commitStart - header)
-				total := len(m.commits) + 1
-				if commitRow >= 0 && commitRow < total {
-					m.commitCursor = commitRow
-					m.focus = focusCommits
-					return m.selectCommit()
-				}
-			} else {
-				// Click in file tree area.
-				treeRow := m.sidebarOffset + row
-				if treeRow >= 0 && treeRow < len(m.tree) {
-					entry := m.tree[treeRow]
-					if entry.fileIdx >= 0 {
-						m.setCursor(entry.fileIdx)
-						m.focus = focusDiff
+		switch msg.Action {
+		case tea.MouseActionPress:
+			// Start drag if clicking near the border (±1 column).
+			if msg.X >= borderX-1 && msg.X <= borderX+1 {
+				m.dragging = true
+				return m, nil
+			}
+
+			inSidebar := msg.X <= borderX
+			if inSidebar {
+				row := msg.Y - headerHeight
+				if row >= commitStart {
+					// Click in commit list area (skip branch header row).
+					header := 0
+					if m.branch != "" || m.sha != "" {
+						header = 1
+					}
+					commitRow := m.commitOffset + (row - commitStart - header)
+					total := len(m.commits) + 1
+					if commitRow >= 0 && commitRow < total {
+						m.commitCursor = commitRow
+						m.focus = focusCommits
+						return m.selectCommit()
+					}
+				} else {
+					// Click in file tree area.
+					treeRow := m.sidebarOffset + row
+					if treeRow >= 0 && treeRow < len(m.tree) {
+						entry := m.tree[treeRow]
+						if entry.fileIdx >= 0 {
+							m.setCursor(entry.fileIdx)
+							m.focus = focusDiff
+						}
 					}
 				}
+			} else {
+				m.focus = focusDiff
 			}
-		} else {
-			m.focus = focusDiff
+
+		case tea.MouseActionMotion:
+			if m.dragging {
+				newWidth := max(minSidebarWidth, min(maxSidebarWidth, msg.X-sidebarPad))
+				if newWidth != m.sidebarWidth {
+					m.sidebarWidth = newWidth
+					m.recalcLayout()
+				}
+			}
+
+		case tea.MouseActionRelease:
+			m.dragging = false
+		}
+
+	case tea.MouseButtonNone:
+		// Motion with no button — handle drag release.
+		if msg.Action == tea.MouseActionRelease {
+			m.dragging = false
 		}
 
 	case tea.MouseButtonWheelUp:
+		inSidebar := msg.X <= borderX
 		if inSidebar {
 			row := msg.Y - headerHeight
 			if row >= commitStart {
@@ -435,6 +481,7 @@ func (m model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseButtonWheelDown:
+		inSidebar := msg.X <= borderX
 		if inSidebar {
 			row := msg.Y - headerHeight
 			if row >= commitStart {

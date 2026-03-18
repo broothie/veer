@@ -23,7 +23,7 @@ func (m model) renderSidebar(height int) string {
 	fileSection := m.renderFileTree(fileH)
 
 	// Separator line.
-	sep := styleFaint.Render(strings.Repeat("─", sidebarWidth))
+	sep := styleFaint.Render(strings.Repeat("─", m.sidebarWidth))
 
 	// Commit list section.
 	commitH := height - fileH - 1 // -1 for separator
@@ -50,7 +50,7 @@ func (m model) renderSidebar(height int) string {
 
 	_ = commitStart
 	return styleSidebar.
-		Width(sidebarWidth + sidebarPad).
+		Width(m.sidebarWidth + sidebarPad).
 		Height(height).
 		Render(strings.Join(lines[:height], "\n"))
 }
@@ -62,7 +62,7 @@ func (m model) renderFileTree(height int) string {
 			msg = "error"
 		}
 		return lipgloss.NewStyle().
-			Width(sidebarWidth).
+			Width(m.sidebarWidth).
 			Height(height).
 			Align(lipgloss.Center, lipgloss.Center).
 			Render(styleFaint.Render(msg))
@@ -135,7 +135,7 @@ func (m model) renderCommitList(height int) string {
 
 			// Truncate message to fit.
 			usedWidth := lipgloss.Width(prefix) + lipgloss.Width(c.SHA) + 3 // 3 for "● " + space
-			msgMax := sidebarWidth - usedWidth
+			msgMax := m.sidebarWidth - usedWidth
 			msg := c.Message
 			if len(msg) > msgMax && msgMax > 3 {
 				msg = msg[:msgMax-1] + "…"
@@ -197,13 +197,13 @@ func (m model) renderTreeEntry(e treeEntry) string {
 
 	// Use lipgloss.Width for accurate width calculation.
 	usedWidth := lipgloss.Width(indent) + lipgloss.Width(prefix) + lipgloss.Width(delta)
-	nameMaxLen := sidebarWidth - usedWidth - 1 // 1 for gap
+	nameMaxLen := m.sidebarWidth - usedWidth - 1 // 1 for gap
 	name := e.name
 	if len(name) > nameMaxLen && nameMaxLen > 3 {
 		name = name[:nameMaxLen-1] + "…"
 	}
 
-	gap := sidebarWidth - lipgloss.Width(indent) - lipgloss.Width(prefix) - lipgloss.Width(name) - lipgloss.Width(delta)
+	gap := m.sidebarWidth - lipgloss.Width(indent) - lipgloss.Width(prefix) - lipgloss.Width(name) - lipgloss.Width(delta)
 	if gap < 1 {
 		gap = 1
 	}

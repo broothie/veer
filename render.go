@@ -76,7 +76,7 @@ func (m model) renderHeader() string {
 
 func (m *model) buildDiffContent() string {
 	if len(m.files) == 0 {
-		vpWidth := max(1, m.width-sidebarWidth-sidebarPad-1-1) // -1 for scrollbar
+		vpWidth := max(1, m.width-m.sidebarWidth-sidebarPad-1-1) // -1 for scrollbar
 		vpHeight := m.mainHeight()
 		m.fileOffsets = nil
 		return lipgloss.NewStyle().
@@ -102,7 +102,7 @@ func (m *model) buildDiffContent() string {
 			sb.WriteByte('\n')
 			lineNum++
 		}
-		vpWidth := max(1, m.width-sidebarWidth-sidebarPad-1-1)
+		vpWidth := max(1, m.width-m.sidebarWidth-sidebarPad-1-1)
 
 		left := " " + f.Path
 
