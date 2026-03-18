@@ -22,12 +22,12 @@ func initDebug(enabled bool) error {
 	}
 
 	dir := filepath.Join(home, ".veer")
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0750); err != nil {
 		return fmt.Errorf("debug: mkdir: %w", err)
 	}
 
 	path := filepath.Join(dir, "debug.log")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		return fmt.Errorf("debug: open log: %w", err)
 	}
