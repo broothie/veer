@@ -19,8 +19,10 @@ import (
 
 // gitRepo implements Repo using go-git.
 type gitRepo struct {
-	repo *git.Repository
-	wt   *git.Worktree
+	repo     *git.Repository
+	wt       *git.Worktree
+	indexMap map[string]plumbing.Hash // lazily built from index entries
+	headTree *object.Tree             // lazily resolved HEAD commit tree
 }
 
 // openRepo opens the nearest git repository from the current directory.
@@ -132,20 +134,45 @@ func (g *gitRepo) Status() (map[string]FileChange, error) {
 	return changes, nil
 }
 
-func (g *gitRepo) HeadContent(path string) string {
+func (g *gitRepo) ensureHeadTree() (*object.Tree, error) {
+	if g.headTree != nil {
+		return g.headTree, nil
+	}
 	ref, err := g.repo.Head()
 	if err != nil {
-		debugf("HeadContent(%s): Head failed: %v", path, err)
-		return ""
+		return nil, err
 	}
 	commit, err := g.repo.CommitObject(ref.Hash())
 	if err != nil {
-		debugf("HeadContent(%s): CommitObject failed: %v", path, err)
-		return ""
+		return nil, err
 	}
 	tree, err := commit.Tree()
 	if err != nil {
-		debugf("HeadContent(%s): Tree failed: %v", path, err)
+		return nil, err
+	}
+	g.headTree = tree
+	return tree, nil
+}
+
+func (g *gitRepo) ensureIndexMap() error {
+	if g.indexMap != nil {
+		return nil
+	}
+	idx, err := g.repo.Storer.Index()
+	if err != nil {
+		return err
+	}
+	g.indexMap = make(map[string]plumbing.Hash, len(idx.Entries))
+	for _, entry := range idx.Entries {
+		g.indexMap[entry.Name] = entry.Hash
+	}
+	return nil
+}
+
+func (g *gitRepo) HeadContent(path string) string {
+	tree, err := g.ensureHeadTree()
+	if err != nil {
+		debugf("HeadContent(%s): ensureHeadTree failed: %v", path, err)
 		return ""
 	}
 	f, err := tree.File(path)
@@ -162,35 +189,32 @@ func (g *gitRepo) HeadContent(path string) string {
 }
 
 func (g *gitRepo) IndexContent(path string) string {
-	idx, err := g.repo.Storer.Index()
-	if err != nil {
-		debugf("IndexContent(%s): Index failed: %v", path, err)
+	if err := g.ensureIndexMap(); err != nil {
+		debugf("IndexContent(%s): ensureIndexMap failed: %v", path, err)
 		return ""
 	}
-	for _, entry := range idx.Entries {
-		if entry.Name != path {
-			continue
-		}
-		blob, err := g.repo.BlobObject(entry.Hash)
-		if err != nil {
-			debugf("IndexContent(%s): BlobObject failed: %v", path, err)
-			return ""
-		}
-		r, err := blob.Reader()
-		if err != nil {
-			debugf("IndexContent(%s): Reader failed: %v", path, err)
-			return ""
-		}
-		defer r.Close()
-		b, err := io.ReadAll(r)
-		if err != nil {
-			debugf("IndexContent(%s): ReadAll failed: %v", path, err)
-			return ""
-		}
-		return string(b)
+	hash, ok := g.indexMap[path]
+	if !ok {
+		debugf("IndexContent(%s): not found in index", path)
+		return ""
 	}
-	debugf("IndexContent(%s): not found in index", path)
-	return ""
+	blob, err := g.repo.BlobObject(hash)
+	if err != nil {
+		debugf("IndexContent(%s): BlobObject failed: %v", path, err)
+		return ""
+	}
+	r, err := blob.Reader()
+	if err != nil {
+		debugf("IndexContent(%s): Reader failed: %v", path, err)
+		return ""
+	}
+	defer r.Close()
+	b, err := io.ReadAll(r)
+	if err != nil {
+		debugf("IndexContent(%s): ReadAll failed: %v", path, err)
+		return ""
+	}
+	return string(b)
 }
 
 func (g *gitRepo) WorktreeContent(path string) string {

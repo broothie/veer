@@ -1,6 +1,6 @@
 module github.com/broothie/veer
 
-go 1.25.6
+go 1.25.1
 
 require (
 	github.com/charmbracelet/bubbles v1.0.0
