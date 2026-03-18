@@ -61,16 +61,19 @@ func renderScrollbar(height, total, offset int, active bool) string {
 	return sb.String()
 }
 
-// renderEmptyColumn renders a 1-char-wide column of spaces to fill reserved layout space.
-func renderEmptyColumn(height int) string {
-	var sb strings.Builder
-	for i := range height {
-		if i > 0 {
-			sb.WriteByte('\n')
-		}
-		sb.WriteByte(' ')
+func joinOverlay(topHeight int, overlay string) string {
+	if topHeight <= 0 {
+		return overlay
 	}
-	return sb.String()
+
+	lines := make([]string, 0, topHeight)
+	for range topHeight {
+		lines = append(lines, "")
+	}
+	if overlay != "" {
+		lines = append(lines, strings.Split(overlay, "\n")...)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m model) renderHeader() string {
@@ -295,7 +298,7 @@ func (m model) renderStatus() string {
 	return styleBar.Width(m.width).Render(styleBar.Render(" " + hint))
 }
 
-func renderPane(title, body string, width, height int, active bool) string {
+func renderPane(title, body, rightOverlay string, width, height int, active bool) string {
 	width = max(2, width)
 	height = max(2, height)
 	innerWidth := max(1, width-2)
@@ -316,6 +319,7 @@ func renderPane(title, body string, width, height int, active bool) string {
 	bottom := borderStyle.Render("└" + strings.Repeat("─", innerWidth) + "┘")
 
 	bodyLines := strings.Split(body, "\n")
+	overlayLines := strings.Split(rightOverlay, "\n")
 	contentStyle := lipgloss.NewStyle().MaxWidth(innerWidth).Width(innerWidth)
 	lines := make([]string, 0, height)
 	lines = append(lines, top)
@@ -324,10 +328,14 @@ func renderPane(title, body string, width, height int, active bool) string {
 		if i < len(bodyLines) {
 			line = bodyLines[i]
 		}
+		rightBorder := borderStyle.Render("│")
+		if i < len(overlayLines) && overlayLines[i] != "" {
+			rightBorder = overlayLines[i]
+		}
 		lines = append(lines,
 			borderStyle.Render("│")+
 				contentStyle.Render(line)+
-				borderStyle.Render("│"),
+				rightBorder,
 		)
 	}
 	lines = append(lines, bottom)

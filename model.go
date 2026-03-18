@@ -18,7 +18,6 @@ const (
 	headerHeight        = 1 // header bar
 	statusHeight        = 1 // status bar
 	paneBorderSize      = 2
-	paneScrollbarWidth  = 1
 )
 
 type focusArea int
@@ -338,11 +337,11 @@ func (m model) sidebarBodyHeight() int {
 }
 
 func (m model) sidebarPaneWidth() int {
-	return m.sidebarWidth + paneScrollbarWidth + paneBorderSize
+	return m.sidebarWidth + paneBorderSize
 }
 
 func (m model) vpWidth() int {
-	return max(1, m.width-m.sidebarPaneWidth()-paneScrollbarWidth-paneBorderSize)
+	return max(1, m.width-m.sidebarPaneWidth()-paneBorderSize)
 }
 
 func (m *model) recalcLayout() {
@@ -1019,31 +1018,19 @@ func (m model) View() string {
 	// Diff scrollbar.
 	totalDiffLines := m.viewport.TotalLineCount()
 	diffScrollbar := renderScrollbar(diffBodyH, totalDiffLines, m.viewport.YOffset, m.focus == focusDiff)
-	if diffScrollbar == "" {
-		diffScrollbar = renderEmptyColumn(diffBodyH)
-	}
 
 	fileScrollbar := renderScrollbar(fileH, len(m.tree), m.sidebarOffset, m.focus == focusFiles)
-	if fileScrollbar == "" {
-		fileScrollbar = renderEmptyColumn(fileH)
-	}
-	fileBody := lipgloss.JoinHorizontal(lipgloss.Top, m.renderFileTree(fileH), fileScrollbar)
-	filePane := renderPane(" changes ", fileBody, m.sidebarPaneWidth(), fileH+paneBorderSize, m.focus == focusFiles)
+	filePane := renderPane(" files ", m.renderFileTree(fileH), fileScrollbar, m.sidebarPaneWidth(), fileH+paneBorderSize, m.focus == focusFiles)
 
 	commitScrollbar := renderScrollbar(commitH, len(m.commits)+1, m.commitOffset, m.focus == focusCommits)
-	if commitScrollbar == "" {
-		commitScrollbar = renderEmptyColumn(commitH)
-	}
 	historyScrollbar := commitScrollbar
 	if msgH > 0 {
-		historyScrollbar = lipgloss.JoinVertical(lipgloss.Left, renderEmptyColumn(msgH), commitScrollbar)
+		historyScrollbar = joinOverlay(msgH, commitScrollbar)
 	}
-	historyBody := lipgloss.JoinHorizontal(lipgloss.Top, m.renderHistoryBody(msgH, commitH), historyScrollbar)
 	historyFocused := m.focus == focusCommitMsg || m.focus == focusCommits
-	historyPane := renderPane(" history ", historyBody, m.sidebarPaneWidth(), msgH+commitH+paneBorderSize, historyFocused)
+	historyPane := renderPane(" history ", m.renderHistoryBody(msgH, commitH), historyScrollbar, m.sidebarPaneWidth(), msgH+commitH+paneBorderSize, historyFocused)
 
-	diffBody := lipgloss.JoinHorizontal(lipgloss.Top, content, diffScrollbar)
-	diffPane := renderPane(" diff ", diffBody, m.width-m.sidebarPaneWidth(), mainH, m.focus == focusDiff)
+	diffPane := renderPane(" diff ", content, diffScrollbar, m.width-m.sidebarPaneWidth(), mainH, m.focus == focusDiff)
 	sidebarColumn := lipgloss.JoinVertical(lipgloss.Left, filePane, historyPane)
 	main := lipgloss.JoinHorizontal(lipgloss.Top, sidebarColumn, diffPane)
 	status := m.renderStatus()

@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -10,6 +11,12 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
+
+var ansiRE = regexp.MustCompile("\x1b\\[[0-9;]*m")
+
+func stripANSI(s string) string {
+	return ansiRE.ReplaceAllString(s, "")
+}
 
 func testModel(files []FileDiff) model {
 	m := model{
@@ -596,8 +603,8 @@ func TestNewModel_HasInitialLayout(t *testing.T) {
 func TestView_ContainsPaneTitles(t *testing.T) {
 	m := testModel(twoFiles)
 	view := m.View()
-	if !strings.Contains(view, " changes ") {
-		t.Fatal("View should include the sidebar pane title")
+	if !strings.Contains(view, " files ") {
+		t.Fatal("View should include the files pane title")
 	}
 	if !strings.Contains(view, " history ") {
 		t.Fatal("View should include the history pane title")
@@ -665,6 +672,28 @@ func TestRenderScrollbar_FocusStateChangesStyle(t *testing.T) {
 	active := renderScrollbar(12, 100, 20, true)
 	if inactive == active {
 		t.Fatal("active scrollbar should render differently from inactive")
+	}
+}
+
+func TestRenderPane_UsesScrollbarOnBorderColumn(t *testing.T) {
+	pane := renderPane(" pane ", "abc\ndef", "█\n", 5, 4, false)
+	lines := strings.Split(stripANSI(pane), "\n")
+	if got := lines[1]; got != "│abc█" {
+		t.Fatalf("first body row = %q, want %q", got, "│abc█")
+	}
+	if got := lines[2]; got != "│def│" {
+		t.Fatalf("second body row = %q, want %q", got, "│def│")
+	}
+}
+
+func TestRenderPane_UsesBorderWhenNoScrollbar(t *testing.T) {
+	pane := renderPane(" pane ", "abc\ndef", "", 5, 4, false)
+	lines := strings.Split(stripANSI(pane), "\n")
+	if got := lines[1]; got != "│abc│" {
+		t.Fatalf("first body row = %q, want %q", got, "│abc│")
+	}
+	if got := lines[2]; got != "│def│" {
+		t.Fatalf("second body row = %q, want %q", got, "│def│")
 	}
 }
 
