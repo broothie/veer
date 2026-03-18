@@ -19,6 +19,7 @@ type config struct {
 	Theme        string           `short:"t" default:"dracula" help:"Syntax highlighting theme (e.g. dracula, monokai, github-dark)."`
 	Staged       bool             `short:"s" help:"Show only staged changes."`
 	Unstaged     bool             `short:"u" help:"Show only unstaged changes."`
+	Debug        bool             `short:"d" help:"Enable debug logging to ~/.veer/debug.log."`
 	Version      kong.VersionFlag `short:"v" help:"Print version."`
 	Ref          string           `arg:"" optional:"" help:"Diff working tree against this ref (branch, tag, SHA)."`
 	Paths        []string         `arg:"" optional:"" help:"Filter to specific paths."`
@@ -32,6 +33,11 @@ func main() {
 		kong.Vars{"version": version},
 		kong.UsageOnError(),
 	)
+
+	if err := initDebug(cfg.Debug); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 
 	initTheme(cfg.Theme)
 

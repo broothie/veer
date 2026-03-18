@@ -98,7 +98,10 @@ type model struct {
 }
 
 func newModel(cfg config) model {
-	cwd, _ := os.Getwd()
+	cwd, err := os.Getwd()
+	if err != nil {
+		debugf("newModel: Getwd failed: %v", err)
+	}
 	if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(cwd, home) {
 		cwd = "~" + cwd[len(home):]
 	}
@@ -138,7 +141,10 @@ func fetchCmd(cfg config) tea.Cmd {
 			return diffResultMsg{err: err}
 		}
 		result, err := fetchDiff(repo, cfg)
-		commits, _ := repo.Log(50)
+		commits, logErr := repo.Log(50)
+		if logErr != nil {
+			debugf("fetchCmd: Log failed: %v", logErr)
+		}
 		return diffResultMsg{
 			result:   result,
 			commits:  commits,

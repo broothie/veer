@@ -22,15 +22,22 @@ type gitRepo struct {
 
 // openRepo opens the nearest git repository from the current directory.
 func openRepo() (*gitRepo, error) {
-	repo, err := git.PlainOpenWithOptions(".", &git.PlainOpenOptions{DetectDotGit: true})
+	debugf("openRepo: opening repository")
+	repo, err := git.PlainOpenWithOptions(".", &git.PlainOpenOptions{
+		DetectDotGit:          true,
+		EnableDotGitCommonDir: true,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("not a git repository")
+		debugf("openRepo: failed: %v", err)
+		return nil, fmt.Errorf("not a git repository: %w", err)
 	}
 
 	wt, err := repo.Worktree()
 	if err != nil {
+		debugf("openRepo: worktree failed: %v", err)
 		return nil, err
 	}
+	debugf("openRepo: root=%s", wt.Filesystem.Root())
 
 	// Load global and system gitignore patterns — go-git doesn't do this automatically.
 	// These functions expect a filesystem rooted at /, not the worktree.
@@ -48,6 +55,7 @@ func openRepo() (*gitRepo, error) {
 func (g *gitRepo) Head() (HeadInfo, error) {
 	ref, err := g.repo.Head()
 	if err != nil {
+		debugf("Head: failed: %v", err)
 		return HeadInfo{}, err
 	}
 
@@ -67,14 +75,19 @@ func (g *gitRepo) Head() (HeadInfo, error) {
 			msg = msg[:idx]
 		}
 		info.Message = msg
+	} else {
+		debugf("Head: commit object failed: %v", err)
 	}
 
+	debugf("Head: branch=%s sha=%s", info.Branch, info.SHA)
 	return info, nil
 }
 
 func (g *gitRepo) Status() (map[string]FileChange, error) {
+	debugf("Status: computing")
 	status, err := g.wt.Status()
 	if err != nil {
+		debugf("Status: failed: %v", err)
 		return nil, err
 	}
 
@@ -93,33 +106,43 @@ func (g *gitRepo) Status() (map[string]FileChange, error) {
 
 		changes[path] = fc
 	}
+	debugf("Status: %d changed files", len(changes))
 	return changes, nil
 }
 
 func (g *gitRepo) HeadContent(path string) string {
 	ref, err := g.repo.Head()
 	if err != nil {
+		debugf("HeadContent(%s): Head failed: %v", path, err)
 		return ""
 	}
 	commit, err := g.repo.CommitObject(ref.Hash())
 	if err != nil {
+		debugf("HeadContent(%s): CommitObject failed: %v", path, err)
 		return ""
 	}
 	tree, err := commit.Tree()
 	if err != nil {
+		debugf("HeadContent(%s): Tree failed: %v", path, err)
 		return ""
 	}
 	f, err := tree.File(path)
 	if err != nil {
+		debugf("HeadContent(%s): File failed: %v", path, err)
 		return ""
 	}
-	content, _ := f.Contents()
+	content, err := f.Contents()
+	if err != nil {
+		debugf("HeadContent(%s): Contents failed: %v", path, err)
+		return ""
+	}
 	return content
 }
 
 func (g *gitRepo) IndexContent(path string) string {
 	idx, err := g.repo.Storer.Index()
 	if err != nil {
+		debugf("IndexContent(%s): Index failed: %v", path, err)
 		return ""
 	}
 	for _, entry := range idx.Entries {
@@ -128,38 +151,46 @@ func (g *gitRepo) IndexContent(path string) string {
 		}
 		blob, err := g.repo.BlobObject(entry.Hash)
 		if err != nil {
+			debugf("IndexContent(%s): BlobObject failed: %v", path, err)
 			return ""
 		}
 		r, err := blob.Reader()
 		if err != nil {
+			debugf("IndexContent(%s): Reader failed: %v", path, err)
 			return ""
 		}
 		defer r.Close()
 		b, err := io.ReadAll(r)
 		if err != nil {
+			debugf("IndexContent(%s): ReadAll failed: %v", path, err)
 			return ""
 		}
 		return string(b)
 	}
+	debugf("IndexContent(%s): not found in index", path)
 	return ""
 }
 
 func (g *gitRepo) WorktreeContent(path string) string {
 	f, err := g.wt.Filesystem.Open(path)
 	if err != nil {
+		debugf("WorktreeContent(%s): Open failed: %v", path, err)
 		return ""
 	}
 	defer f.Close()
 	b, err := io.ReadAll(f)
 	if err != nil {
+		debugf("WorktreeContent(%s): ReadAll failed: %v", path, err)
 		return ""
 	}
 	return string(b)
 }
 
 func (g *gitRepo) Log(n int) ([]CommitInfo, error) {
+	debugf("Log: fetching up to %d commits", n)
 	iter, err := g.repo.Log(&git.LogOptions{})
 	if err != nil {
+		debugf("Log: failed: %v", err)
 		return nil, err
 	}
 	defer iter.Close()
@@ -188,30 +219,41 @@ func (g *gitRepo) Log(n int) ([]CommitInfo, error) {
 			Message: msg,
 		})
 	}
+	debugf("Log: got %d commits", len(commits))
 	return commits, nil
 }
 
 func (g *gitRepo) DiffCommit(sha string) ([]FileDiff, error) {
+	debugf("DiffCommit: %s", sha)
 	hash := plumbing.NewHash(sha)
 	commit, err := g.repo.CommitObject(hash)
 	if err != nil {
+		debugf("DiffCommit: CommitObject failed: %v", err)
 		return nil, err
 	}
 
 	commitTree, err := commit.Tree()
 	if err != nil {
+		debugf("DiffCommit: Tree failed: %v", err)
 		return nil, err
 	}
 
 	var parentTree *object.Tree
 	if commit.NumParents() > 0 {
 		if parent, err := commit.Parents().Next(); err == nil {
-			parentTree, _ = parent.Tree()
+			if pt, err := parent.Tree(); err == nil {
+				parentTree = pt
+			} else {
+				debugf("DiffCommit: parent Tree failed: %v", err)
+			}
+		} else {
+			debugf("DiffCommit: parent Next failed: %v", err)
 		}
 	}
 
 	changes, err := object.DiffTree(parentTree, commitTree)
 	if err != nil {
+		debugf("DiffCommit: DiffTree failed: %v", err)
 		return nil, err
 	}
 
@@ -219,6 +261,7 @@ func (g *gitRepo) DiffCommit(sha string) ([]FileDiff, error) {
 	for _, change := range changes {
 		action, err := change.Action()
 		if err != nil {
+			debugf("DiffCommit: Action failed: %v", err)
 			continue
 		}
 
@@ -237,7 +280,11 @@ func (g *gitRepo) DiffCommit(sha string) ([]FileDiff, error) {
 		}
 
 		lines, _, added, removed, err := buildDiffLines(path, oldContent, newContent, 3)
-		if err != nil || len(lines) == 0 {
+		if err != nil {
+			debugf("DiffCommit: buildDiffLines(%s) failed: %v", path, err)
+			continue
+		}
+		if len(lines) == 0 {
 			continue
 		}
 
@@ -252,6 +299,7 @@ func (g *gitRepo) DiffCommit(sha string) ([]FileDiff, error) {
 	sort.Slice(files, func(i, j int) bool {
 		return files[i].Path < files[j].Path
 	})
+	debugf("DiffCommit: %d files", len(files))
 	return files, nil
 }
 
@@ -259,6 +307,7 @@ func (g *gitRepo) resolveRef(ref string) (plumbing.Hash, error) {
 	// Try as a branch/tag name first.
 	h, err := g.repo.ResolveRevision(plumbing.Revision(ref))
 	if err != nil {
+		debugf("resolveRef(%s): failed: %v", ref, err)
 		return plumbing.ZeroHash, fmt.Errorf("unknown ref %q: %w", ref, err)
 	}
 	return *h, nil
@@ -267,20 +316,24 @@ func (g *gitRepo) resolveRef(ref string) (plumbing.Hash, error) {
 func (g *gitRepo) RefContent(ref, path string) string {
 	hash, err := g.resolveRef(ref)
 	if err != nil {
+		debugf("RefContent(%s, %s): resolveRef failed: %v", ref, path, err)
 		return ""
 	}
 	commit, err := g.repo.CommitObject(hash)
 	if err != nil {
+		debugf("RefContent(%s, %s): CommitObject failed: %v", ref, path, err)
 		return ""
 	}
 	tree, err := commit.Tree()
 	if err != nil {
+		debugf("RefContent(%s, %s): Tree failed: %v", ref, path, err)
 		return ""
 	}
 	return treeFileContent(tree, path)
 }
 
 func (g *gitRepo) DiffRefPaths(ref string) ([]string, error) {
+	debugf("DiffRefPaths: %s", ref)
 	hash, err := g.resolveRef(ref)
 	if err != nil {
 		return nil, err
@@ -316,6 +369,7 @@ func (g *gitRepo) DiffRefPaths(ref string) ([]string, error) {
 	for _, change := range changes {
 		action, err := change.Action()
 		if err != nil {
+			debugf("DiffRefPaths: Action failed: %v", err)
 			continue
 		}
 		switch action {
@@ -325,6 +379,7 @@ func (g *gitRepo) DiffRefPaths(ref string) ([]string, error) {
 			paths = append(paths, change.From.Name)
 		}
 	}
+	debugf("DiffRefPaths: %d paths", len(paths))
 	return paths, nil
 }
 
@@ -335,8 +390,13 @@ func treeFileContent(tree *object.Tree, path string) string {
 	}
 	f, err := tree.File(path)
 	if err != nil {
+		debugf("treeFileContent(%s): File failed: %v", path, err)
 		return ""
 	}
-	content, _ := f.Contents()
+	content, err := f.Contents()
+	if err != nil {
+		debugf("treeFileContent(%s): Contents failed: %v", path, err)
+		return ""
+	}
 	return content
 }
