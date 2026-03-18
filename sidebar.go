@@ -18,6 +18,7 @@ type treeEntry struct {
 
 func (m model) renderSidebar(height int) string {
 	fileH, msgH, _ := m.sidebarSplit()
+	commitH := height - fileH - msgH
 
 	// File tree section.
 	fileSection := m.renderFileTree(fileH)
@@ -41,7 +42,6 @@ func (m model) renderSidebar(height int) string {
 	}
 
 	// Commit list section.
-	commitH := height - fileH - msgH
 	commitSection := m.renderCommitList(commitH)
 	commitLines := strings.Split(commitSection, "\n")
 	lines = append(lines, commitLines...)
@@ -141,6 +141,12 @@ func (m model) renderCommitList(height int) string {
 			headLabel := "HEAD"
 			if m.branch != "" {
 				headLabel += " (" + m.branch + ")"
+			}
+			// Truncate to fit sidebar width.
+			markerWidth := lipgloss.Width("● ")
+			maxLabel := m.sidebarWidth - lipgloss.Width(prefix) - markerWidth
+			if len(headLabel) > maxLabel && maxLabel > 3 {
+				headLabel = headLabel[:maxLabel-1] + "…"
 			}
 			if m.selectedCommit == -1 {
 				headLabel = styleActive.Render("● ") + headLabel

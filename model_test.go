@@ -340,6 +340,21 @@ func TestRenderHeader_NoMessage(t *testing.T) {
 	}
 }
 
+func TestRenderHeader_ShowsBranchAndTruncatesCWD(t *testing.T) {
+	m := testModel(twoFiles)
+	m.width = 80
+	m.cwd = "/Users/andrewbooth/Developer/github.com/broothie/veer"
+	m.branch = "claude/optimize-monorepo-performance-aLsBS"
+
+	header := m.renderHeader()
+	if !strings.Contains(header, "optimize-monorepo-performance-aLsBS") {
+		t.Error("header should contain the branch when width is constrained")
+	}
+	if strings.Contains(header, "/Users/andrewbooth/Developer/github.com/broothie/veer") {
+		t.Error("header should truncate the cwd when space is constrained")
+	}
+}
+
 // --- renderStatus ---
 
 func TestRenderHeader_WithFilesDelta(t *testing.T) {
@@ -538,6 +553,37 @@ func TestView_EmptyWhenNoWidth(t *testing.T) {
 	m.width = 0
 	if m.View() != "" {
 		t.Error("View should return empty string when width is 0")
+	}
+}
+
+func TestNewModel_HasInitialLayout(t *testing.T) {
+	m := newModel(config{SidebarWidth: defaultSidebarWidth})
+	if m.width == 0 || m.height == 0 {
+		t.Fatalf("newModel should have a non-zero initial layout, got %dx%d", m.width, m.height)
+	}
+	if got := m.View(); got == "" {
+		t.Fatal("newModel View should not be empty before the first window size message")
+	}
+}
+
+func TestView_HeightMatchesWindow(t *testing.T) {
+	m := testModel(twoFiles)
+	if got := len(strings.Split(m.View(), "\n")); got != m.height {
+		t.Fatalf("View line count = %d, want %d", got, m.height)
+	}
+}
+
+func TestHandleKey_Quit_ClosesWatcher(t *testing.T) {
+	m := testModel(twoFiles)
+	closed := false
+	m.watcherClose = func() { closed = true }
+
+	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	if !closed {
+		t.Fatal("quit should close the watcher")
+	}
+	if cmd == nil {
+		t.Fatal("quit should return a command")
 	}
 }
 

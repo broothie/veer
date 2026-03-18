@@ -1,11 +1,12 @@
 module github.com/broothie/veer
 
-go 1.25.1
+go 1.24.7
 
 require (
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
+	github.com/fsnotify/fsnotify v1.9.0
 	github.com/go-git/go-git/v5 v5.17.0
 	github.com/pmezard/go-difflib v1.0.0
 )
