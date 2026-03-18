@@ -367,7 +367,7 @@ func TestRenderStatus_FocusHints(t *testing.T) {
 
 	m.focus = focusFiles
 	status := m.renderStatus()
-	if !strings.Contains(status, "enter/l: open") {
+	if !strings.Contains(status, "enter: open") {
 		t.Error("file-focused status should show file hints")
 	}
 

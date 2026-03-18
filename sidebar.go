@@ -22,11 +22,8 @@ func (m model) renderSidebar(height int) string {
 	// File tree section.
 	fileSection := m.renderFileTree(fileH)
 
-	// Separator bar.
-	sep := styleBar.Width(m.sidebarWidth).Render("")
-
 	// Commit list section.
-	commitH := height - fileH - 1 // -1 for separator
+	commitH := height - fileH
 	commitSection := m.renderCommitList(commitH)
 
 	lines := make([]string, 0, height)
@@ -37,9 +34,6 @@ func (m model) renderSidebar(height int) string {
 	for len(lines) < fileH {
 		lines = append(lines, "")
 	}
-
-	// Separator.
-	lines = append(lines, sep)
 
 	// Commit list lines.
 	commitLines := strings.Split(commitSection, "\n")
@@ -86,13 +80,18 @@ func (m model) renderCommitList(height int) string {
 
 	var lines []string
 
-	// Branch/ref header.
+	// Branch/ref header line.
 	branch := m.branch
 	if branch == "" && m.sha != "" {
 		branch = m.sha
 	}
 	if branch != "" {
-		lines = append(lines, styleBranch.Render(" "+branch))
+		label := " " + branch + " "
+		lineWidth := m.sidebarWidth - lipgloss.Width(label)
+		if lineWidth < 0 {
+			lineWidth = 0
+		}
+		lines = append(lines, styleFaint.Render(label+strings.Repeat("─", lineWidth)))
 		height-- // consume one row
 	}
 

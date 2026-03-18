@@ -9,7 +9,7 @@ import (
 
 var (
 	styleScrollThumb = lipgloss.NewStyle().Background(lipgloss.Color("244"))
-	styleScrollTrack = lipgloss.NewStyle().Background(lipgloss.Color("236"))
+	styleScrollTrack = lipgloss.NewStyle().Background(lipgloss.Color("237"))
 	styleBar         = lipgloss.NewStyle().Background(lipgloss.Color("237"))
 )
 
@@ -186,7 +186,7 @@ func (m model) renderStatus() string {
 
 	switch m.focus {
 	case focusFiles:
-		parts = append(parts, "enter/l: open  tab: commits  q: quit")
+		parts = append(parts, "enter: open  tab: commits  q: quit")
 	case focusCommits:
 		parts = append(parts, "enter: select  tab: diff  shift+tab: files  q: quit")
 	case focusDiff:

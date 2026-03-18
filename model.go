@@ -275,7 +275,7 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.diffScroll(func(v *viewport.Model) { v.ViewDown() })
 	case "ctrl+b":
 		m.diffScroll(func(v *viewport.Model) { v.ViewUp() })
-	case "l", "enter":
+	case "enter":
 		return m.keyOpen()
 	}
 	return m, nil
@@ -595,11 +595,11 @@ func (m model) branchHeaderRows() int {
 func (m model) sidebarSplit() (int, int) {
 	mainH := m.mainHeight()
 	commitH := m.commitListHeight()
-	fileH := mainH - commitH - 1 // -1 for separator
+	fileH := mainH - commitH
 	if fileH < 1 {
 		fileH = 1
 	}
-	return fileH, fileH + 1 // +1 for separator line
+	return fileH, fileH
 }
 
 func (m model) commitListHeight() int {
