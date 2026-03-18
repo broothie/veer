@@ -22,6 +22,14 @@ Veer watches your working tree for changes and displays a live, color-coded diff
 
 ## Install
 
+### Homebrew
+
+```
+brew install broothie/tap/veer
+```
+
+### Go
+
 ```
 go install github.com/broothie/veer@latest
 ```
