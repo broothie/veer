@@ -27,17 +27,14 @@ var skipDirs = map[string]bool{
 	".turbo":           true,
 }
 
-const (
-	maxWatches       = 4096
-	debounceDuration = 100 * time.Millisecond
-)
+const maxWatches = 4096
 
 type filesChangedMsg struct{}
 
 // startWatcher creates an fsnotify file watcher for the repo root.
 // Returns a channel that receives notifications when files change, and a cleanup function.
 // Returns nil channel if the watcher could not be created.
-func startWatcher(repoRoot string) (<-chan struct{}, func()) {
+func startWatcher(repoRoot string, debounce time.Duration, extraSkipDirs []string) (<-chan struct{}, func()) {
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
 		debugf("watcher: failed to create: %v", err)
@@ -47,11 +44,19 @@ func startWatcher(repoRoot string) (<-chan struct{}, func()) {
 	ch := make(chan struct{}, 1)
 	done := make(chan struct{})
 
+	allSkipDirs := make(map[string]bool, len(skipDirs)+len(extraSkipDirs))
+	for k, v := range skipDirs {
+		allSkipDirs[k] = v
+	}
+	for _, d := range extraSkipDirs {
+		allSkipDirs[d] = true
+	}
+
 	watchGitDir(w, repoRoot)
-	count := watchWorktree(w, repoRoot)
+	count := watchWorktree(w, repoRoot, allSkipDirs)
 	debugf("watcher: watching %d directories under %s", count, repoRoot)
 
-	go debounceLoop(w, ch, done, repoRoot)
+	go debounceLoop(w, ch, done, repoRoot, debounce)
 
 	cleanup := func() {
 		close(done)
@@ -62,7 +67,7 @@ func startWatcher(repoRoot string) (<-chan struct{}, func()) {
 }
 
 // debounceLoop reads fsnotify events and coalesces them into single notifications.
-func debounceLoop(w *fsnotify.Watcher, ch chan<- struct{}, done <-chan struct{}, repoRoot string) {
+func debounceLoop(w *fsnotify.Watcher, ch chan<- struct{}, done <-chan struct{}, repoRoot string, debounce time.Duration) {
 	var timer *time.Timer
 	for {
 		select {
@@ -81,7 +86,7 @@ func debounceLoop(w *fsnotify.Watcher, ch chan<- struct{}, done <-chan struct{},
 			if timer != nil {
 				timer.Stop()
 			}
-			timer = time.AfterFunc(debounceDuration, func() {
+			timer = time.AfterFunc(debounce, func() {
 				select {
 				case ch <- struct{}{}:
 				default:
@@ -124,7 +129,7 @@ func watchGitDir(w *fsnotify.Watcher, repoRoot string) {
 }
 
 // watchWorktree walks the worktree and watches directories, skipping known-large ones.
-func watchWorktree(w *fsnotify.Watcher, root string) int {
+func watchWorktree(w *fsnotify.Watcher, root string, skip map[string]bool) int {
 	count := 0
 	filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil || !d.IsDir() {
@@ -133,7 +138,7 @@ func watchWorktree(w *fsnotify.Watcher, root string) int {
 		if count >= maxWatches {
 			return filepath.SkipAll
 		}
-		if skipDirs[d.Name()] {
+		if skip[d.Name()] {
 			return filepath.SkipDir
 		}
 		if err := w.Add(path); err == nil {

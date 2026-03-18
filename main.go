@@ -13,12 +13,14 @@ import (
 var version = "dev"
 
 type config struct {
-	Interval     time.Duration    `short:"n" default:"250ms" help:"Refresh interval."`
+	Interval     time.Duration    `short:"n" default:"250ms" help:"Refresh interval (fallback when file watcher is active)."`
+	Debounce     time.Duration    `name:"debounce" default:"100ms" help:"File watcher debounce duration."`
 	SidebarWidth int              `short:"w" name:"sidebar-width" default:"35" help:"Initial sidebar width."`
 	Context      int              `short:"U" default:"3" help:"Number of context lines in diff."`
 	Theme        string           `short:"t" default:"dracula" help:"Syntax highlighting theme (e.g. dracula, monokai, github-dark)."`
 	Staged       bool             `short:"s" help:"Show only staged changes."`
 	Unstaged     bool             `short:"u" help:"Show only unstaged changes."`
+	SkipDirs     []string         `name:"skip-dir" help:"Additional directories to skip when watching for changes."`
 	Debug        bool             `short:"d" help:"Enable debug logging to ~/.veer/debug.log."`
 	Version      kong.VersionFlag `short:"v" help:"Print version."`
 	Ref          string           `arg:"" optional:"" help:"Diff working tree against this ref (branch, tag, SHA)."`

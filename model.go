@@ -234,7 +234,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Start file watcher on first successful fetch.
 		var cmds []tea.Cmd
 		if !m.watcherReady && msg.repoRoot != "" {
-			ch, cleanup := startWatcher(msg.repoRoot)
+			ch, cleanup := startWatcher(msg.repoRoot, m.cfg.Debounce, m.cfg.SkipDirs)
 			if ch != nil {
 				m.watcherCh = ch
 				m.watcherClose = cleanup
