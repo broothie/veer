@@ -13,7 +13,7 @@ import (
 type LineType int
 
 const (
-	LineContext   LineType = iota
+	LineContext LineType = iota
 	LineAdded
 	LineRemoved
 	LineSeparator
@@ -112,73 +112,66 @@ func fetchDiff(repo Repo, cfg config) (*DiffResult, error) {
 
 	for _, path := range paths {
 		fc := status[path]
-
-		showStaged := fc.Staged && !cfg.Unstaged
-		showUnstaged := fc.Unstaged && !cfg.Staged
-
-		fd := FileDiff{
-			Path:     path,
-			Staged:   fc.Staged,
-			Unstaged: fc.Unstaged,
+		fd := buildFileDiff(repo, path, fc, cfg)
+		if len(fd.Lines) > 0 {
+			result.Files = append(result.Files, fd)
 		}
-
-		headContent := repo.HeadContent(path)
-		indexContent := repo.IndexContent(path)
-
-		var worktreeContent string
-		if !fc.WorktreeDeleted {
-			worktreeContent = repo.WorktreeContent(path)
-		}
-
-		hasBoth := showStaged && showUnstaged
-
-		// Staged diff: HEAD vs index.
-		if showStaged {
-			var stagedOld, stagedNew string
-			stagedOld = headContent
-			if !fc.StagingDeleted {
-				stagedNew = indexContent
-			}
-
-			lines, added, removed, err := buildDiffLines(path, stagedOld, stagedNew, cfg.Context)
-			if err == nil && len(lines) > 0 {
-				if hasBoth {
-					fd.Lines = append(fd.Lines, DiffLine{Type: LineHeader, Content: "staged"})
-				}
-				fd.Lines = append(fd.Lines, lines...)
-				fd.Added += added
-				fd.Removed += removed
-			}
-		}
-
-		// Unstaged diff: index vs worktree.
-		if showUnstaged {
-			var unstagedOld string
-			if indexContent != "" {
-				unstagedOld = indexContent
-			} else {
-				unstagedOld = headContent
-			}
-
-			lines, added, removed, err := buildDiffLines(path, unstagedOld, worktreeContent, cfg.Context)
-			if err == nil && len(lines) > 0 {
-				if hasBoth {
-					fd.Lines = append(fd.Lines, DiffLine{Type: LineHeader, Content: "unstaged"})
-				}
-				fd.Lines = append(fd.Lines, lines...)
-				fd.Added += added
-				fd.Removed += removed
-			}
-		}
-
-		if len(fd.Lines) == 0 {
-			continue
-		}
-
-		result.Files = append(result.Files, fd)
 	}
 
 	return result, nil
+}
+
+func buildFileDiff(repo Repo, path string, fc FileChange, cfg config) FileDiff {
+	showStaged := fc.Staged && !cfg.Unstaged
+	showUnstaged := fc.Unstaged && !cfg.Staged
+
+	fd := FileDiff{
+		Path:     path,
+		Staged:   fc.Staged,
+		Unstaged: fc.Unstaged,
+	}
+
+	headContent := repo.HeadContent(path)
+	indexContent := repo.IndexContent(path)
+
+	var worktreeContent string
+	if !fc.WorktreeDeleted {
+		worktreeContent = repo.WorktreeContent(path)
+	}
+
+	hasBoth := showStaged && showUnstaged
+
+	if showStaged {
+		old := headContent
+		new := indexContent
+		if fc.StagingDeleted {
+			new = ""
+		}
+		appendDiffSection(&fd, path, old, new, "staged", hasBoth, cfg.Context)
+	}
+
+	if showUnstaged {
+		old := indexContent
+		if old == "" {
+			old = headContent
+		}
+		appendDiffSection(&fd, path, old, worktreeContent, "unstaged", hasBoth, cfg.Context)
+	}
+
+	return fd
+}
+
+func appendDiffSection(fd *FileDiff, path, old, new, label string, showLabel bool, context int) {
+	lines, added, removed, err := buildDiffLines(path, old, new, context)
+	if err != nil || len(lines) == 0 {
+		return
+	}
+	if showLabel {
+		fd.Lines = append(fd.Lines, DiffLine{Type: LineHeader, Content: label})
+	}
+	fd.Lines = append(fd.Lines, lines...)
+	fd.Added += added
+	fd.Removed += removed
 }
 
 // fetchRefDiff diffs the working tree against an arbitrary ref.

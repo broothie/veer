@@ -37,9 +37,9 @@ func (f *fakeRepo) WorktreeContent(path string) string {
 	return ""
 }
 
-func (f *fakeRepo) RefContent(ref, path string) string { return "" }
+func (f *fakeRepo) RefContent(ref, path string) string        { return "" }
 func (f *fakeRepo) DiffRefPaths(ref string) ([]string, error) { return nil, nil }
-func (f *fakeRepo) Log(n int) ([]CommitInfo, error) { return nil, nil }
+func (f *fakeRepo) Log(n int) ([]CommitInfo, error)           { return nil, nil }
 func (f *fakeRepo) DiffCommit(sha string) ([]FileDiff, error) { return nil, nil }
 
 func TestFetchDiff_HeadInfo(t *testing.T) {
