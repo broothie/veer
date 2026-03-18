@@ -21,6 +21,7 @@ type config struct {
 	DumpView     bool             `name:"dump-view" help:"Render one frame to stdout and exit."`
 	DumpWidth    int              `name:"dump-width" default:"120" help:"Width to use with --dump-view."`
 	DumpHeight   int              `name:"dump-height" default:"40" help:"Height to use with --dump-view."`
+	NoHighlight  bool             `name:"no-syntax-highlight" help:"Disable syntax highlighting."`
 	Staged       bool             `short:"s" help:"Show only staged changes."`
 	Unstaged     bool             `short:"u" help:"Show only unstaged changes."`
 	SkipDirs     []string         `name:"skip-dir" help:"Additional directories to skip when watching for changes."`
@@ -44,7 +45,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	initTheme(cfg.Theme)
+	initTheme(cfg.Theme, !cfg.NoHighlight)
 
 	if cfg.DumpView {
 		view, err := dumpView(cfg)
