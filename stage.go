@@ -45,6 +45,16 @@ func stageHunkCmd(root, path string, hunk Hunk) tea.Cmd {
 	}
 }
 
+func unstageHunkCmd(root, path string, hunk Hunk) tea.Cmd {
+	return func() tea.Msg {
+		patch := buildPatch(path, hunk)
+		cmd := exec.Command("git", "apply", "--cached", "--reverse", "--unidiff-zero")
+		cmd.Dir = root
+		cmd.Stdin = strings.NewReader(patch)
+		return stageResultMsg{err: cmd.Run()}
+	}
+}
+
 func commitStagedCmd(root, message string) tea.Cmd {
 	return func() tea.Msg {
 		cmd := exec.Command("git", "commit", "-m", message)

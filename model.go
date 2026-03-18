@@ -368,7 +368,7 @@ func (m *model) stageHunkAtY(y int) tea.Cmd {
 	}
 	hunk := f.Hunks[ref.hunkIdx]
 	if hunk.Section == "staged" {
-		return nil
+		return unstageHunkCmd(m.repoRoot, f.Path, hunk)
 	}
 	return stageHunkCmd(m.repoRoot, f.Path, hunk)
 }
@@ -401,7 +401,7 @@ func (m *model) stageCurrentHunk() tea.Cmd {
 
 	hunk := f.Hunks[ref.hunkIdx]
 	if hunk.Section == "staged" {
-		return nil // already staged
+		return unstageHunkCmd(m.repoRoot, f.Path, hunk)
 	}
 
 	return stageHunkCmd(m.repoRoot, f.Path, hunk)

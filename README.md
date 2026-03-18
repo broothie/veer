@@ -69,5 +69,6 @@ veer -t monokai         # use monokai syntax theme (default dracula)
 - [ ] Ensure README matches implementation
 - [ ] Flesh out tests
 - [ ] Run go vet in CI
+- [ ] Add GitHub info (issues, discussions, etc.)
 - [x] Set up goreleaser
 - [x] Syntax highlighting

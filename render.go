@@ -208,14 +208,18 @@ func (m *model) buildDiffContent() string {
 }
 
 func renderDiffLine(dl DiffLine, numWidth int, hl highlightedLine, section string) string {
-	// Gutter staging indicator: S (staged) or M (unstaged).
+	// Gutter staging indicator: S (staged) or M (unstaged), only on changed lines.
 	var indicator string
-	switch section {
-	case "staged":
-		indicator = styleStaged.Inherit(styleGutter).Render("S")
-	case "unstaged":
-		indicator = styleSHA.Inherit(styleGutter).Render("M")
-	default:
+	if dl.Type == LineAdded || dl.Type == LineRemoved {
+		switch section {
+		case "staged":
+			indicator = styleStaged.Inherit(styleGutter).Render("S")
+		case "unstaged":
+			indicator = styleSHA.Inherit(styleGutter).Render("M")
+		default:
+			indicator = styleGutter.Render(" ")
+		}
+	} else {
 		indicator = styleGutter.Render(" ")
 	}
 
