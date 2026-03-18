@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -60,7 +61,9 @@ func startWatcher(repoRoot string, debounce time.Duration, extraSkipDirs []strin
 
 	cleanup := func() {
 		close(done)
-		w.Close()
+		if err := w.Close(); err != nil {
+			debugf("watcher: close failed: %v", err)
+		}
 	}
 
 	return ch, cleanup
@@ -125,7 +128,19 @@ func resolveGitDir(repoRoot string) (string, error) {
 		return gitPath, nil
 	}
 
-	data, err := os.ReadFile(gitPath)
+	root, err := os.OpenRoot(repoRoot)
+	if err != nil {
+		return "", err
+	}
+	defer root.Close()
+
+	gitFile, err := root.Open(".git")
+	if err != nil {
+		return "", err
+	}
+	defer gitFile.Close()
+
+	data, err := io.ReadAll(gitFile)
 	if err != nil {
 		return "", err
 	}
