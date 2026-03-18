@@ -37,6 +37,8 @@ func (f *fakeRepo) WorktreeContent(path string) string {
 	return ""
 }
 
+func (f *fakeRepo) RefContent(ref, path string) string { return "" }
+func (f *fakeRepo) DiffRefPaths(ref string) ([]string, error) { return nil, nil }
 func (f *fakeRepo) Log(n int) ([]CommitInfo, error) { return nil, nil }
 func (f *fakeRepo) DiffCommit(sha string) ([]FileDiff, error) { return nil, nil }
 
@@ -46,7 +48,7 @@ func TestFetchDiff_HeadInfo(t *testing.T) {
 		files: map[string]FileChange{},
 	}
 
-	result, err := fetchDiff(repo, nil)
+	result, err := fetchDiff(repo, config{Context: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +71,7 @@ func TestFetchDiff_UnstagedNewFile(t *testing.T) {
 		worktree: map[string]string{"hello.txt": "hello\nworld\n"},
 	}
 
-	result, err := fetchDiff(repo, nil)
+	result, err := fetchDiff(repo, config{Context: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +103,7 @@ func TestFetchDiff_UnstagedModified(t *testing.T) {
 		worktree: map[string]string{"file.txt": "line1\nchanged\nline3\n"},
 	}
 
-	result, err := fetchDiff(repo, nil)
+	result, err := fetchDiff(repo, config{Context: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +125,7 @@ func TestFetchDiff_StagedFile(t *testing.T) {
 		index: map[string]string{"new.txt": "staged content\n"},
 	}
 
-	result, err := fetchDiff(repo, nil)
+	result, err := fetchDiff(repo, config{Context: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +152,7 @@ func TestFetchDiff_StagedAndUnstaged(t *testing.T) {
 		worktree: map[string]string{"file.txt": "worktree change\n"},
 	}
 
-	result, err := fetchDiff(repo, nil)
+	result, err := fetchDiff(repo, config{Context: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +199,7 @@ func TestFetchDiff_StagedOnly_NoHeaders(t *testing.T) {
 		index: map[string]string{"file.txt": "new\n"},
 	}
 
-	result, err := fetchDiff(repo, nil)
+	result, err := fetchDiff(repo, config{Context: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +220,7 @@ func TestFetchDiff_DeletedFile(t *testing.T) {
 		worktree: map[string]string{"gone.txt": "should not be read"},
 	}
 
-	result, err := fetchDiff(repo, nil)
+	result, err := fetchDiff(repo, config{Context: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +250,7 @@ func TestFetchDiff_PathFilter(t *testing.T) {
 		},
 	}
 
-	result, err := fetchDiff(repo, []string{"--", "src"})
+	result, err := fetchDiff(repo, config{Context: 3, Paths: []string{"src"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,7 +280,7 @@ func TestFetchDiff_FilesSorted(t *testing.T) {
 		},
 	}
 
-	result, err := fetchDiff(repo, nil)
+	result, err := fetchDiff(repo, config{Context: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,7 +301,7 @@ func TestFetchDiff_NoChanges(t *testing.T) {
 		files: map[string]FileChange{},
 	}
 
-	result, err := fetchDiff(repo, nil)
+	result, err := fetchDiff(repo, config{Context: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,7 +403,7 @@ func TestBuildDiffLines(t *testing.T) {
 	old := "aaa\nbbb\nccc\n"
 	new := "aaa\nBBB\nccc\n"
 
-	lines, added, removed, err := buildDiffLines("test.txt", old, new)
+	lines, added, removed, err := buildDiffLines("test.txt", old, new, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -417,38 +419,12 @@ func TestBuildDiffLines(t *testing.T) {
 
 func TestBuildDiffLines_Identical(t *testing.T) {
 	content := "same\n"
-	lines, _, _, err := buildDiffLines("test.txt", content, content)
+	lines, _, _, err := buildDiffLines("test.txt", content, content, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(lines) != 0 {
 		t.Errorf("got %d lines for identical content, want 0", len(lines))
-	}
-}
-
-func TestPathFiltersFrom(t *testing.T) {
-	tests := []struct {
-		args []string
-		want []string
-	}{
-		{nil, nil},
-		{[]string{"--", "src"}, []string{"src"}},
-		{[]string{"--", "src", "lib"}, []string{"src", "lib"}},
-		{[]string{"src"}, []string{"src"}},
-		{[]string{"-v", "--", "src"}, []string{"src"}},
-	}
-
-	for _, tt := range tests {
-		got := pathFiltersFrom(tt.args)
-		if len(got) != len(tt.want) {
-			t.Errorf("pathFiltersFrom(%v) = %v, want %v", tt.args, got, tt.want)
-			continue
-		}
-		for i := range got {
-			if got[i] != tt.want[i] {
-				t.Errorf("pathFiltersFrom(%v)[%d] = %q, want %q", tt.args, i, got[i], tt.want[i])
-			}
-		}
 	}
 }
 

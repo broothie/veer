@@ -11,12 +11,11 @@ import (
 )
 
 const (
-	defaultSidebarWidth = 30
+	defaultSidebarWidth = 35
 	minSidebarWidth     = 15
 	maxSidebarWidth     = 80
-	sidebarPad          = 1
-	refreshInterval     = 500 * time.Millisecond
-	headerHeight        = 2 // header line + blank line
+	sidebarPad   = 1
+	headerHeight = 2 // header line + blank line
 	statusHeight        = 2 // blank line + status line
 )
 
@@ -60,7 +59,7 @@ type (
 )
 
 type model struct {
-	gitArgs        []string
+	cfg            config
 	files          []FileDiff
 	tree           []treeEntry
 	branch         string
@@ -86,35 +85,41 @@ type model struct {
 	selectedCommit int    // -1 = working tree, 0+ = index into commits
 }
 
-func newModel(args []string) model {
+func newModel(cfg config) model {
 	cwd, _ := os.Getwd()
 	if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(cwd, home) {
 		cwd = "~" + cwd[len(home):]
 	}
+	sw := cfg.SidebarWidth
+	if sw < minSidebarWidth {
+		sw = minSidebarWidth
+	} else if sw > maxSidebarWidth {
+		sw = maxSidebarWidth
+	}
 	return model{
-		gitArgs:        args,
+		cfg:            cfg,
 		focus:          focusFiles,
 		cwd:            cwd,
-		sidebarWidth:   defaultSidebarWidth,
+		sidebarWidth:   sw,
 		selectedCommit: -1,
 	}
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(fetchCmd(m.gitArgs), tickCmd())
+	return tea.Batch(fetchCmd(m.cfg), tickCmd(m.cfg.Interval))
 }
 
-func tickCmd() tea.Cmd {
-	return tea.Tick(refreshInterval, func(time.Time) tea.Msg { return tickMsg{} })
+func tickCmd(interval time.Duration) tea.Cmd {
+	return tea.Tick(interval, func(time.Time) tea.Msg { return tickMsg{} })
 }
 
-func fetchCmd(args []string) tea.Cmd {
+func fetchCmd(cfg config) tea.Cmd {
 	return func() tea.Msg {
 		repo, err := openRepo()
 		if err != nil {
 			return diffResultMsg{nil, nil, err}
 		}
-		result, err := fetchDiff(repo, args)
+		result, err := fetchDiff(repo, cfg)
 		commits, _ := repo.Log(50)
 		return diffResultMsg{result, commits, err}
 	}
@@ -140,10 +145,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		if m.fetching {
-			return m, tickCmd()
+			return m, tickCmd(m.cfg.Interval)
 		}
 		m.fetching = true
-		return m, tea.Batch(fetchCmd(m.gitArgs), tickCmd())
+		return m, tea.Batch(fetchCmd(m.cfg), tickCmd(m.cfg.Interval))
 
 	case diffResultMsg:
 		m.fetching = false

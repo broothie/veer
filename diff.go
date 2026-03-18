@@ -75,12 +75,14 @@ type Repo interface {
 	HeadContent(path string) string
 	IndexContent(path string) string
 	WorktreeContent(path string) string
+	RefContent(ref, path string) string
+	DiffRefPaths(ref string) ([]string, error)
 	Log(n int) ([]CommitInfo, error)
 	DiffCommit(sha string) ([]FileDiff, error)
 }
 
 // fetchDiff queries the repo and returns diffs along with HEAD metadata.
-func fetchDiff(repo Repo, args []string) (*DiffResult, error) {
+func fetchDiff(repo Repo, cfg config) (*DiffResult, error) {
 	result := &DiffResult{}
 
 	if head, err := repo.Head(); err == nil {
@@ -89,16 +91,19 @@ func fetchDiff(repo Repo, args []string) (*DiffResult, error) {
 		result.Message = head.Message
 	}
 
+	// Ref-based diff: compare ref tree vs worktree.
+	if cfg.Ref != "" {
+		return fetchRefDiff(repo, cfg, result)
+	}
+
 	status, err := repo.Status()
 	if err != nil {
 		return result, err
 	}
 
-	pathFilters := pathFiltersFrom(args)
-
 	var paths []string
 	for path := range status {
-		if !matchesFilters(path, pathFilters) {
+		if !matchesFilters(path, cfg.Paths) {
 			continue
 		}
 		paths = append(paths, path)
@@ -107,6 +112,10 @@ func fetchDiff(repo Repo, args []string) (*DiffResult, error) {
 
 	for _, path := range paths {
 		fc := status[path]
+
+		showStaged := fc.Staged && !cfg.Unstaged
+		showUnstaged := fc.Unstaged && !cfg.Staged
+
 		fd := FileDiff{
 			Path:     path,
 			Staged:   fc.Staged,
@@ -121,17 +130,17 @@ func fetchDiff(repo Repo, args []string) (*DiffResult, error) {
 			worktreeContent = repo.WorktreeContent(path)
 		}
 
-		hasBoth := fc.Staged && fc.Unstaged
+		hasBoth := showStaged && showUnstaged
 
 		// Staged diff: HEAD vs index.
-		if fc.Staged {
+		if showStaged {
 			var stagedOld, stagedNew string
 			stagedOld = headContent
 			if !fc.StagingDeleted {
 				stagedNew = indexContent
 			}
 
-			lines, added, removed, err := buildDiffLines(path, stagedOld, stagedNew)
+			lines, added, removed, err := buildDiffLines(path, stagedOld, stagedNew, cfg.Context)
 			if err == nil && len(lines) > 0 {
 				if hasBoth {
 					fd.Lines = append(fd.Lines, DiffLine{Type: LineHeader, Content: "staged"})
@@ -143,7 +152,7 @@ func fetchDiff(repo Repo, args []string) (*DiffResult, error) {
 		}
 
 		// Unstaged diff: index vs worktree.
-		if fc.Unstaged {
+		if showUnstaged {
 			var unstagedOld string
 			if indexContent != "" {
 				unstagedOld = indexContent
@@ -151,7 +160,7 @@ func fetchDiff(repo Repo, args []string) (*DiffResult, error) {
 				unstagedOld = headContent
 			}
 
-			lines, added, removed, err := buildDiffLines(path, unstagedOld, worktreeContent)
+			lines, added, removed, err := buildDiffLines(path, unstagedOld, worktreeContent, cfg.Context)
 			if err == nil && len(lines) > 0 {
 				if hasBoth {
 					fd.Lines = append(fd.Lines, DiffLine{Type: LineHeader, Content: "unstaged"})
@@ -172,14 +181,61 @@ func fetchDiff(repo Repo, args []string) (*DiffResult, error) {
 	return result, nil
 }
 
+// fetchRefDiff diffs the working tree against an arbitrary ref.
+func fetchRefDiff(repo Repo, cfg config, result *DiffResult) (*DiffResult, error) {
+	changedPaths, err := repo.DiffRefPaths(cfg.Ref)
+	if err != nil {
+		return result, err
+	}
+
+	// Also include worktree-modified files (unstaged changes on top of HEAD).
+	status, _ := repo.Status()
+
+	pathSet := make(map[string]bool)
+	for _, p := range changedPaths {
+		pathSet[p] = true
+	}
+	for p := range status {
+		pathSet[p] = true
+	}
+
+	var paths []string
+	for p := range pathSet {
+		if !matchesFilters(p, cfg.Paths) {
+			continue
+		}
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+
+	for _, path := range paths {
+		refContent := repo.RefContent(cfg.Ref, path)
+		worktreeContent := repo.WorktreeContent(path)
+
+		lines, added, removed, err := buildDiffLines(path, refContent, worktreeContent, cfg.Context)
+		if err != nil || len(lines) == 0 {
+			continue
+		}
+
+		result.Files = append(result.Files, FileDiff{
+			Path:    path,
+			Lines:   lines,
+			Added:   added,
+			Removed: removed,
+		})
+	}
+
+	return result, nil
+}
+
 // buildDiffLines computes a unified diff and parses it into structured DiffLines.
-func buildDiffLines(path, old, new string) ([]DiffLine, int, int, error) {
+func buildDiffLines(path, old, new string, context int) ([]DiffLine, int, int, error) {
 	ud := difflib.UnifiedDiff{
 		A:        difflib.SplitLines(old),
 		B:        difflib.SplitLines(new),
 		FromFile: "a/" + path,
 		ToFile:   "b/" + path,
-		Context:  3,
+		Context:  context,
 	}
 	text, err := difflib.GetUnifiedDiffString(ud)
 	if err != nil || text == "" {
@@ -247,22 +303,6 @@ func parseUnifiedDiff(rawLines []string) ([]DiffLine, int, int, error) {
 	}
 
 	return lines, added, removed, nil
-}
-
-// pathFiltersFrom extracts path args (non-flags, post "--") from args.
-func pathFiltersFrom(args []string) []string {
-	var filters []string
-	pastSep := false
-	for _, arg := range args {
-		if arg == "--" {
-			pastSep = true
-			continue
-		}
-		if pastSep || !strings.HasPrefix(arg, "-") {
-			filters = append(filters, filepath.Clean(arg))
-		}
-	}
-	return filters
 }
 
 // matchesFilters returns true if path is under any of the filter prefixes,

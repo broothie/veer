@@ -12,6 +12,7 @@ import (
 
 func testModel(files []FileDiff) model {
 	m := model{
+		cfg:            config{Context: 3, SidebarWidth: defaultSidebarWidth},
 		files:          files,
 		tree:           buildTree(files),
 		focus:          focusFiles,

@@ -236,7 +236,7 @@ func (g *gitRepo) DiffCommit(sha string) ([]FileDiff, error) {
 			newContent = treeFileContent(commitTree, path)
 		}
 
-		lines, added, removed, err := buildDiffLines(path, oldContent, newContent)
+		lines, added, removed, err := buildDiffLines(path, oldContent, newContent, 3)
 		if err != nil || len(lines) == 0 {
 			continue
 		}
@@ -253,6 +253,79 @@ func (g *gitRepo) DiffCommit(sha string) ([]FileDiff, error) {
 		return files[i].Path < files[j].Path
 	})
 	return files, nil
+}
+
+func (g *gitRepo) resolveRef(ref string) (plumbing.Hash, error) {
+	// Try as a branch/tag name first.
+	h, err := g.repo.ResolveRevision(plumbing.Revision(ref))
+	if err != nil {
+		return plumbing.ZeroHash, fmt.Errorf("unknown ref %q: %w", ref, err)
+	}
+	return *h, nil
+}
+
+func (g *gitRepo) RefContent(ref, path string) string {
+	hash, err := g.resolveRef(ref)
+	if err != nil {
+		return ""
+	}
+	commit, err := g.repo.CommitObject(hash)
+	if err != nil {
+		return ""
+	}
+	tree, err := commit.Tree()
+	if err != nil {
+		return ""
+	}
+	return treeFileContent(tree, path)
+}
+
+func (g *gitRepo) DiffRefPaths(ref string) ([]string, error) {
+	hash, err := g.resolveRef(ref)
+	if err != nil {
+		return nil, err
+	}
+	refCommit, err := g.repo.CommitObject(hash)
+	if err != nil {
+		return nil, err
+	}
+	refTree, err := refCommit.Tree()
+	if err != nil {
+		return nil, err
+	}
+
+	headRef, err := g.repo.Head()
+	if err != nil {
+		return nil, err
+	}
+	headCommit, err := g.repo.CommitObject(headRef.Hash())
+	if err != nil {
+		return nil, err
+	}
+	headTree, err := headCommit.Tree()
+	if err != nil {
+		return nil, err
+	}
+
+	changes, err := object.DiffTree(refTree, headTree)
+	if err != nil {
+		return nil, err
+	}
+
+	var paths []string
+	for _, change := range changes {
+		action, err := change.Action()
+		if err != nil {
+			continue
+		}
+		switch action {
+		case merkletrie.Insert, merkletrie.Modify:
+			paths = append(paths, change.To.Name)
+		case merkletrie.Delete:
+			paths = append(paths, change.From.Name)
+		}
+	}
+	return paths, nil
 }
 
 // treeFileContent reads a file's content from a git tree, returning "" on any error.

@@ -25,8 +25,14 @@ go install github.com/broothie/veer@latest
 ## Usage
 
 ```
-veer                # show all unstaged changes
-veer -- src/        # filter to a specific path
+veer                     # show all working tree changes
+veer main                # diff working tree against a ref
+veer src/ lib/           # filter to specific paths
+veer main src/           # combine ref and path filter
+veer -s                  # show only staged changes
+veer -U 5               # 5 lines of context
+veer -n 1s              # refresh every 1 second
+veer -w 40              # initial sidebar width of 40 (default 35)
 ```
 
 ## Keybindings
@@ -48,7 +54,7 @@ Mouse: click to select files, scroll wheel to navigate or scroll.
 
 - [x] Line numbers
 - [x] Git history
-- [ ] CLI flags
+- [x] CLI flags
 - [x] Thicker sidebars
 - [x] Resizable sidebar
 - [x] Scrollbar
