@@ -7,7 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-var styleSidebar = lipgloss.NewStyle().PaddingRight(sidebarPad)
+var styleSidebar = lipgloss.NewStyle()
 
 // treeEntry is a row in the sidebar: either a directory header or a file.
 type treeEntry struct {
@@ -50,9 +50,33 @@ func (m model) renderSidebar(height int) string {
 	}
 
 	return styleSidebar.
-		Width(m.sidebarWidth + sidebarPad).
+		Width(m.sidebarWidth).
 		Height(height).
 		Render(strings.Join(lines[:height], "\n"))
+}
+
+func (m model) renderHistoryBody(msgH, commitH int) string {
+	lines := make([]string, 0, msgH+commitH)
+
+	if msgH > 0 {
+		msgLines := m.renderCommitInput()
+		lines = append(lines, msgLines...)
+		for len(lines) < msgH {
+			lines = append(lines, "")
+		}
+	}
+
+	commitSection := m.renderCommitList(commitH)
+	commitLines := strings.Split(commitSection, "\n")
+	lines = append(lines, commitLines...)
+	for len(lines) < msgH+commitH {
+		lines = append(lines, "")
+	}
+
+	return styleSidebar.
+		Width(m.sidebarWidth).
+		Height(msgH + commitH).
+		Render(strings.Join(lines[:msgH+commitH], "\n"))
 }
 
 func (m model) renderCommitInput() []string {
@@ -114,17 +138,6 @@ func (m model) renderCommitList(height int) string {
 	}
 
 	var lines []string
-
-	// History header line.
-	{
-		label := " history "
-		lineWidth := m.sidebarWidth - lipgloss.Width(label)
-		if lineWidth < 0 {
-			lineWidth = 0
-		}
-		lines = append(lines, styleFaint.Render(label+strings.Repeat("─", lineWidth)))
-		height-- // consume one row
-	}
 
 	total := len(m.commits) + 1 // +1 for HEAD entry
 

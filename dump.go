@@ -35,7 +35,7 @@ func buildDumpView(cfg config, repo Repo, cwd string) (string, error) {
 	m.cwd = cwd
 	m.width = max(1, cfg.DumpWidth)
 	m.height = max(2, cfg.DumpHeight)
-	m.viewport = viewport.New(m.vpWidth(), m.mainHeight())
+	m.viewport = viewport.New(m.vpWidth(), m.paneBodyHeight())
 	m.branch = result.Branch
 	m.sha = result.SHA
 	m.message = result.Message

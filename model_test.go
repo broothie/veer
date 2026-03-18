@@ -587,6 +587,20 @@ func TestNewModel_HasInitialLayout(t *testing.T) {
 	}
 }
 
+func TestView_ContainsPaneTitles(t *testing.T) {
+	m := testModel(twoFiles)
+	view := m.View()
+	if !strings.Contains(view, " changes ") {
+		t.Fatal("View should include the sidebar pane title")
+	}
+	if !strings.Contains(view, " history ") {
+		t.Fatal("View should include the history pane title")
+	}
+	if !strings.Contains(view, " diff ") {
+		t.Fatal("View should include the diff pane title")
+	}
+}
+
 func TestView_HeightMatchesWindow(t *testing.T) {
 	m := testModel(twoFiles)
 	if got := len(strings.Split(m.View(), "\n")); got != m.height {
@@ -611,21 +625,21 @@ func TestHandleKey_Quit_ClosesWatcher(t *testing.T) {
 // --- renderScrollbar ---
 
 func TestRenderScrollbar_NoScrollNeeded(t *testing.T) {
-	result := renderScrollbar(20, 10, 0)
+	result := renderScrollbar(20, 10, 0, false)
 	if result != "" {
 		t.Error("should return empty when content fits")
 	}
 }
 
 func TestRenderScrollbar_ExactFit(t *testing.T) {
-	result := renderScrollbar(20, 20, 0)
+	result := renderScrollbar(20, 20, 0, false)
 	if result != "" {
 		t.Error("should return empty when content exactly fits")
 	}
 }
 
 func TestRenderScrollbar_HasCorrectHeight(t *testing.T) {
-	result := renderScrollbar(10, 50, 0)
+	result := renderScrollbar(10, 50, 0, false)
 	lines := strings.Split(result, "\n")
 	if len(lines) != 10 {
 		t.Errorf("scrollbar height = %d, want 10", len(lines))
@@ -633,10 +647,18 @@ func TestRenderScrollbar_HasCorrectHeight(t *testing.T) {
 }
 
 func TestRenderScrollbar_ThumbMovesWithOffset(t *testing.T) {
-	top := renderScrollbar(20, 100, 0)
-	bottom := renderScrollbar(20, 100, 80)
+	top := renderScrollbar(20, 100, 0, false)
+	bottom := renderScrollbar(20, 100, 80, false)
 	if top == bottom {
 		t.Error("scrollbar should look different at top vs bottom")
+	}
+}
+
+func TestRenderScrollbar_FocusStateChangesStyle(t *testing.T) {
+	inactive := renderScrollbar(12, 100, 20, false)
+	active := renderScrollbar(12, 100, 20, true)
+	if inactive == active {
+		t.Fatal("active scrollbar should render differently from inactive")
 	}
 }
 

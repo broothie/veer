@@ -8,19 +8,27 @@ import (
 )
 
 var (
-	styleScrollThumb = lipgloss.NewStyle().Background(lipgloss.Color("244"))
-	styleScrollTrack = lipgloss.NewStyle().Background(lipgloss.Color("237"))
-	styleBar         = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("237"))
+	styleScrollThumb       = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	styleScrollThumbActive = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+	styleScrollTrack       = lipgloss.NewStyle().Foreground(lipgloss.Color("239"))
+	styleScrollTrackActive = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	styleBar               = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("237"))
+	stylePaneBorder        = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	stylePaneBorderActive  = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true)
+	stylePaneTitle         = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
+	stylePaneTitleActive   = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true)
 )
 
 const (
-	scrollThumbChar = "█"
-	scrollTrackChar = " "
+	scrollThumbChar       = "█"
+	scrollThumbCharActive = "▐"
+	scrollTrackChar       = "│"
+	scrollTrackCharActive = "┃"
 )
 
 // renderScrollbar renders a vertical scrollbar column of the given height.
 // Returns empty string if all content is visible.
-func renderScrollbar(height, total, offset int) string {
+func renderScrollbar(height, total, offset int, active bool) string {
 	if total <= height {
 		return ""
 	}
@@ -30,14 +38,24 @@ func renderScrollbar(height, total, offset int) string {
 	thumbPos := offset * (height - thumbSize) / maxOffset
 
 	var sb strings.Builder
+	thumbStyle := styleScrollThumb
+	trackStyle := styleScrollTrack
+	thumbChar := scrollThumbChar
+	trackChar := scrollTrackChar
+	if active {
+		thumbStyle = styleScrollThumbActive
+		trackStyle = styleScrollTrackActive
+		thumbChar = scrollThumbCharActive
+		trackChar = scrollTrackCharActive
+	}
 	for i := range height {
 		if i > 0 {
 			sb.WriteByte('\n')
 		}
 		if i >= thumbPos && i < thumbPos+thumbSize {
-			sb.WriteString(styleScrollThumb.Render(scrollThumbChar))
+			sb.WriteString(thumbStyle.Render(thumbChar))
 		} else {
-			sb.WriteString(styleScrollTrack.Render(scrollTrackChar))
+			sb.WriteString(trackStyle.Render(trackChar))
 		}
 	}
 	return sb.String()
@@ -51,18 +69,6 @@ func renderEmptyColumn(height int) string {
 			sb.WriteByte('\n')
 		}
 		sb.WriteByte(' ')
-	}
-	return sb.String()
-}
-
-// renderBorder renders a thin vertical border column of the given height.
-func renderBorder(height int) string {
-	var sb strings.Builder
-	for i := range height {
-		if i > 0 {
-			sb.WriteByte('\n')
-		}
-		sb.WriteString(styleFaint.Render("│"))
 	}
 	return sb.String()
 }
@@ -138,7 +144,7 @@ func truncateRight(s string, maxWidth int) string {
 func (m *model) buildDiffContent() string {
 	if len(m.files) == 0 {
 		vpWidth := m.vpWidth()
-		vpHeight := m.mainHeight()
+		vpHeight := m.paneBodyHeight()
 		m.fileOffsets = nil
 		m.hunkRefs = nil
 		return lipgloss.NewStyle().
@@ -289,4 +295,43 @@ func (m model) renderStatus() string {
 	}
 
 	return styleBar.Width(m.width).Render(styleBar.Render(" " + hint))
+}
+
+func renderPane(title, body string, width, height int, active bool) string {
+	width = max(2, width)
+	height = max(2, height)
+	innerWidth := max(1, width-2)
+	bodyHeight := max(1, height-2)
+
+	borderStyle := stylePaneBorder
+	titleStyle := stylePaneTitle
+	if active {
+		borderStyle = stylePaneBorderActive
+		titleStyle = stylePaneTitleActive
+	}
+
+	titleText := truncateRight(title, innerWidth)
+	topFill := max(0, innerWidth-lipgloss.Width(titleText))
+	top := borderStyle.Render("┌") +
+		titleStyle.Render(titleText) +
+		borderStyle.Render(strings.Repeat("─", topFill)+"┐")
+	bottom := borderStyle.Render("└" + strings.Repeat("─", innerWidth) + "┘")
+
+	bodyLines := strings.Split(body, "\n")
+	contentStyle := lipgloss.NewStyle().MaxWidth(innerWidth).Width(innerWidth)
+	lines := make([]string, 0, height)
+	lines = append(lines, top)
+	for i := 0; i < bodyHeight; i++ {
+		line := ""
+		if i < len(bodyLines) {
+			line = bodyLines[i]
+		}
+		lines = append(lines,
+			borderStyle.Render("│")+
+				contentStyle.Render(line)+
+				borderStyle.Render("│"),
+		)
+	}
+	lines = append(lines, bottom)
+	return strings.Join(lines, "\n")
 }
