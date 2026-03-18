@@ -52,8 +52,23 @@ func (m model) renderTreeEntry(e treeEntry) string {
 
 	addStr := fmt.Sprintf("+%d", f.Added)
 	remStr := fmt.Sprintf("-%d", f.Removed)
-	delta := addStr + " " + remStr
-	coloredDelta := styleAdd.Render(addStr) + " " + styleRem.Render(remStr)
+
+	// Status indicator: S=staged, M=unstaged (modified).
+	var status, coloredStatus string
+	switch {
+	case f.Staged && f.Unstaged:
+		status = "SM"
+		coloredStatus = styleStaged.Render("S") + styleSHA.Render("M")
+	case f.Staged:
+		status = "S "
+		coloredStatus = styleStaged.Render("S") + " "
+	default:
+		status = "M "
+		coloredStatus = styleSHA.Render("M") + " "
+	}
+
+	delta := addStr + " " + remStr + " " + status
+	coloredDelta := styleAdd.Render(addStr) + " " + styleRem.Render(remStr) + " " + coloredStatus
 
 	prefix := "  "
 	if e.fileIdx == m.cursor {

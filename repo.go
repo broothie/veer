@@ -79,60 +79,20 @@ func (g *gitRepo) Status() (map[string]FileChange, error) {
 		if fs.Worktree == git.Unmodified && fs.Staging == git.Unmodified {
 			continue
 		}
-		changes[path] = FileChange{
-			Deleted: fs.Worktree == git.Deleted,
+
+		fc := FileChange{
+			Staged:          fs.Staging != git.Unmodified && fs.Staging != git.Untracked,
+			Unstaged:        fs.Worktree != git.Unmodified,
+			StagingDeleted:  fs.Staging == git.Deleted,
+			WorktreeDeleted: fs.Worktree == git.Deleted,
 		}
+
+		changes[path] = fc
 	}
 	return changes, nil
 }
 
-func (g *gitRepo) OldContent(path string) string {
-	if content, err := g.indexedContent(path); err == nil {
-		return content
-	}
-	return g.headContent(path)
-}
-
-func (g *gitRepo) NewContent(path string) string {
-	f, err := g.wt.Filesystem.Open(path)
-	if err != nil {
-		return ""
-	}
-	defer f.Close()
-	b, err := io.ReadAll(f)
-	if err != nil {
-		return ""
-	}
-	return string(b)
-}
-
-// indexedContent reads a file's content from the git index (staging area).
-func (g *gitRepo) indexedContent(path string) (string, error) {
-	idx, err := g.repo.Storer.Index()
-	if err != nil {
-		return "", err
-	}
-	for _, entry := range idx.Entries {
-		if entry.Name != path {
-			continue
-		}
-		blob, err := g.repo.BlobObject(entry.Hash)
-		if err != nil {
-			return "", err
-		}
-		r, err := blob.Reader()
-		if err != nil {
-			return "", err
-		}
-		defer r.Close()
-		b, err := io.ReadAll(r)
-		return string(b), err
-	}
-	return "", fmt.Errorf("not in index: %s", path)
-}
-
-// headContent reads a file's content from HEAD, returning "" on any error.
-func (g *gitRepo) headContent(path string) string {
+func (g *gitRepo) HeadContent(path string) string {
 	ref, err := g.repo.Head()
 	if err != nil {
 		return ""
@@ -151,4 +111,44 @@ func (g *gitRepo) headContent(path string) string {
 	}
 	content, _ := f.Contents()
 	return content
+}
+
+func (g *gitRepo) IndexContent(path string) string {
+	idx, err := g.repo.Storer.Index()
+	if err != nil {
+		return ""
+	}
+	for _, entry := range idx.Entries {
+		if entry.Name != path {
+			continue
+		}
+		blob, err := g.repo.BlobObject(entry.Hash)
+		if err != nil {
+			return ""
+		}
+		r, err := blob.Reader()
+		if err != nil {
+			return ""
+		}
+		defer r.Close()
+		b, err := io.ReadAll(r)
+		if err != nil {
+			return ""
+		}
+		return string(b)
+	}
+	return ""
+}
+
+func (g *gitRepo) WorktreeContent(path string) string {
+	f, err := g.wt.Filesystem.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	b, err := io.ReadAll(f)
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }

@@ -30,6 +30,8 @@ var (
 	styleBranch  = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
 	styleSHA     = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
 	styleDir     = lipgloss.NewStyle().Faint(true)
+	styleStaged  = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	styleHeader  = lipgloss.NewStyle().Faint(true)
 
 	styleSidebar = lipgloss.NewStyle().
 			BorderRight(true).

@@ -17,6 +17,7 @@ const (
 	LineAdded
 	LineRemoved
 	LineSeparator
+	LineHeader // section header (e.g., "staged", "unstaged")
 )
 
 // DiffLine is a single rendered line in a diff, carrying line numbers.
@@ -37,10 +38,12 @@ type DiffResult struct {
 
 // FileDiff holds the structured diff for a single file.
 type FileDiff struct {
-	Path    string
-	Lines   []DiffLine
-	Added   int
-	Removed int
+	Path     string
+	Lines    []DiffLine
+	Added    int
+	Removed  int
+	Staged   bool
+	Unstaged bool
 }
 
 // HeadInfo holds metadata about the current HEAD.
@@ -52,18 +55,22 @@ type HeadInfo struct {
 
 // FileChange describes the state of a changed file.
 type FileChange struct {
-	Deleted bool
+	Staged          bool
+	Unstaged        bool
+	StagingDeleted  bool
+	WorktreeDeleted bool
 }
 
 // Repo abstracts git repository operations needed for diffing.
 type Repo interface {
 	Head() (HeadInfo, error)
 	Status() (map[string]FileChange, error)
-	OldContent(path string) string
-	NewContent(path string) string
+	HeadContent(path string) string
+	IndexContent(path string) string
+	WorktreeContent(path string) string
 }
 
-// fetchDiff queries the repo and returns unstaged diffs along with HEAD metadata.
+// fetchDiff queries the repo and returns diffs along with HEAD metadata.
 func fetchDiff(repo Repo, args []string) (*DiffResult, error) {
 	result := &DiffResult{}
 
@@ -91,25 +98,66 @@ func fetchDiff(repo Repo, args []string) (*DiffResult, error) {
 
 	for _, path := range paths {
 		fc := status[path]
-
-		old := repo.OldContent(path)
-
-		var new string
-		if !fc.Deleted {
-			new = repo.NewContent(path)
+		fd := FileDiff{
+			Path:     path,
+			Staged:   fc.Staged,
+			Unstaged: fc.Unstaged,
 		}
 
-		lines, added, removed, err := buildDiffLines(path, old, new)
-		if err != nil || len(lines) == 0 {
+		headContent := repo.HeadContent(path)
+		indexContent := repo.IndexContent(path)
+
+		var worktreeContent string
+		if !fc.WorktreeDeleted {
+			worktreeContent = repo.WorktreeContent(path)
+		}
+
+		hasBoth := fc.Staged && fc.Unstaged
+
+		// Staged diff: HEAD vs index.
+		if fc.Staged {
+			var stagedOld, stagedNew string
+			stagedOld = headContent
+			if !fc.StagingDeleted {
+				stagedNew = indexContent
+			}
+
+			lines, added, removed, err := buildDiffLines(path, stagedOld, stagedNew)
+			if err == nil && len(lines) > 0 {
+				if hasBoth {
+					fd.Lines = append(fd.Lines, DiffLine{Type: LineHeader, Content: "staged"})
+				}
+				fd.Lines = append(fd.Lines, lines...)
+				fd.Added += added
+				fd.Removed += removed
+			}
+		}
+
+		// Unstaged diff: index vs worktree.
+		if fc.Unstaged {
+			var unstagedOld string
+			if indexContent != "" {
+				unstagedOld = indexContent
+			} else {
+				unstagedOld = headContent
+			}
+
+			lines, added, removed, err := buildDiffLines(path, unstagedOld, worktreeContent)
+			if err == nil && len(lines) > 0 {
+				if hasBoth {
+					fd.Lines = append(fd.Lines, DiffLine{Type: LineHeader, Content: "unstaged"})
+				}
+				fd.Lines = append(fd.Lines, lines...)
+				fd.Added += added
+				fd.Removed += removed
+			}
+		}
+
+		if len(fd.Lines) == 0 {
 			continue
 		}
 
-		result.Files = append(result.Files, FileDiff{
-			Path:    path,
-			Lines:   lines,
-			Added:   added,
-			Removed: removed,
-		})
+		result.Files = append(result.Files, fd)
 	}
 
 	return result, nil

@@ -6,25 +6,33 @@ import (
 
 // fakeRepo implements Repo for testing.
 type fakeRepo struct {
-	head  HeadInfo
-	files map[string]FileChange
-	old   map[string]string
-	new   map[string]string
+	head     HeadInfo
+	files    map[string]FileChange
+	headc    map[string]string
+	index    map[string]string
+	worktree map[string]string
 }
 
-func (f *fakeRepo) Head() (HeadInfo, error)              { return f.head, nil }
+func (f *fakeRepo) Head() (HeadInfo, error)                { return f.head, nil }
 func (f *fakeRepo) Status() (map[string]FileChange, error) { return f.files, nil }
 
-func (f *fakeRepo) OldContent(path string) string {
-	if f.old != nil {
-		return f.old[path]
+func (f *fakeRepo) HeadContent(path string) string {
+	if f.headc != nil {
+		return f.headc[path]
 	}
 	return ""
 }
 
-func (f *fakeRepo) NewContent(path string) string {
-	if f.new != nil {
-		return f.new[path]
+func (f *fakeRepo) IndexContent(path string) string {
+	if f.index != nil {
+		return f.index[path]
+	}
+	return ""
+}
+
+func (f *fakeRepo) WorktreeContent(path string) string {
+	if f.worktree != nil {
+		return f.worktree[path]
 	}
 	return ""
 }
@@ -51,11 +59,11 @@ func TestFetchDiff_HeadInfo(t *testing.T) {
 	}
 }
 
-func TestFetchDiff_NewFile(t *testing.T) {
+func TestFetchDiff_UnstagedNewFile(t *testing.T) {
 	repo := &fakeRepo{
-		head:  HeadInfo{Branch: "main", SHA: "abc1234", Message: "init"},
-		files: map[string]FileChange{"hello.txt": {}},
-		new:   map[string]string{"hello.txt": "hello\nworld\n"},
+		head:     HeadInfo{Branch: "main", SHA: "abc1234", Message: "init"},
+		files:    map[string]FileChange{"hello.txt": {Unstaged: true}},
+		worktree: map[string]string{"hello.txt": "hello\nworld\n"},
 	}
 
 	result, err := fetchDiff(repo, nil)
@@ -77,14 +85,17 @@ func TestFetchDiff_NewFile(t *testing.T) {
 	if f.Removed != 0 {
 		t.Errorf("removed = %d, want 0", f.Removed)
 	}
+	if !f.Unstaged || f.Staged {
+		t.Error("should be unstaged only")
+	}
 }
 
-func TestFetchDiff_ModifiedFile(t *testing.T) {
+func TestFetchDiff_UnstagedModified(t *testing.T) {
 	repo := &fakeRepo{
-		head:  HeadInfo{Branch: "main", SHA: "abc1234", Message: "init"},
-		files: map[string]FileChange{"file.txt": {}},
-		old:   map[string]string{"file.txt": "line1\nline2\nline3\n"},
-		new:   map[string]string{"file.txt": "line1\nchanged\nline3\n"},
+		head:     HeadInfo{Branch: "main", SHA: "abc1234", Message: "init"},
+		files:    map[string]FileChange{"file.txt": {Unstaged: true}},
+		index:    map[string]string{"file.txt": "line1\nline2\nline3\n"},
+		worktree: map[string]string{"file.txt": "line1\nchanged\nline3\n"},
 	}
 
 	result, err := fetchDiff(repo, nil)
@@ -102,12 +113,106 @@ func TestFetchDiff_ModifiedFile(t *testing.T) {
 	}
 }
 
-func TestFetchDiff_DeletedFile(t *testing.T) {
+func TestFetchDiff_StagedFile(t *testing.T) {
 	repo := &fakeRepo{
 		head:  HeadInfo{Branch: "main", SHA: "abc1234", Message: "init"},
-		files: map[string]FileChange{"gone.txt": {Deleted: true}},
-		old:   map[string]string{"gone.txt": "bye\n"},
-		new:   map[string]string{"gone.txt": "should not be read"},
+		files: map[string]FileChange{"new.txt": {Staged: true}},
+		index: map[string]string{"new.txt": "staged content\n"},
+	}
+
+	result, err := fetchDiff(repo, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result.Files) != 1 {
+		t.Fatalf("got %d files, want 1", len(result.Files))
+	}
+
+	f := result.Files[0]
+	if !f.Staged || f.Unstaged {
+		t.Error("should be staged only")
+	}
+	if f.Added != 1 {
+		t.Errorf("added = %d, want 1", f.Added)
+	}
+}
+
+func TestFetchDiff_StagedAndUnstaged(t *testing.T) {
+	repo := &fakeRepo{
+		head:     HeadInfo{Branch: "main", SHA: "abc1234", Message: "init"},
+		files:    map[string]FileChange{"file.txt": {Staged: true, Unstaged: true}},
+		headc:    map[string]string{"file.txt": "original\n"},
+		index:    map[string]string{"file.txt": "staged change\n"},
+		worktree: map[string]string{"file.txt": "worktree change\n"},
+	}
+
+	result, err := fetchDiff(repo, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result.Files) != 1 {
+		t.Fatalf("got %d files, want 1", len(result.Files))
+	}
+
+	f := result.Files[0]
+	if !f.Staged || !f.Unstaged {
+		t.Error("should be both staged and unstaged")
+	}
+
+	// Should have section headers when both staged and unstaged.
+	headers := 0
+	for _, l := range f.Lines {
+		if l.Type == LineHeader {
+			headers++
+		}
+	}
+	if headers != 2 {
+		t.Errorf("got %d section headers, want 2 (staged + unstaged)", headers)
+	}
+
+	// First header should be "staged", second "unstaged".
+	headerIdx := 0
+	for _, l := range f.Lines {
+		if l.Type == LineHeader {
+			if headerIdx == 0 && l.Content != "staged" {
+				t.Errorf("first header = %q, want %q", l.Content, "staged")
+			}
+			if headerIdx == 1 && l.Content != "unstaged" {
+				t.Errorf("second header = %q, want %q", l.Content, "unstaged")
+			}
+			headerIdx++
+		}
+	}
+}
+
+func TestFetchDiff_StagedOnly_NoHeaders(t *testing.T) {
+	repo := &fakeRepo{
+		head:  HeadInfo{Branch: "main", SHA: "abc1234", Message: "init"},
+		files: map[string]FileChange{"file.txt": {Staged: true}},
+		index: map[string]string{"file.txt": "new\n"},
+	}
+
+	result, err := fetchDiff(repo, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	f := result.Files[0]
+	for _, l := range f.Lines {
+		if l.Type == LineHeader {
+			t.Error("should not have section headers when only staged")
+		}
+	}
+}
+
+func TestFetchDiff_DeletedFile(t *testing.T) {
+	repo := &fakeRepo{
+		head:     HeadInfo{Branch: "main", SHA: "abc1234", Message: "init"},
+		files:    map[string]FileChange{"gone.txt": {Unstaged: true, WorktreeDeleted: true}},
+		index:    map[string]string{"gone.txt": "bye\n"},
+		worktree: map[string]string{"gone.txt": "should not be read"},
 	}
 
 	result, err := fetchDiff(repo, nil)
@@ -129,11 +234,11 @@ func TestFetchDiff_PathFilter(t *testing.T) {
 	repo := &fakeRepo{
 		head: HeadInfo{Branch: "main", SHA: "abc1234", Message: "init"},
 		files: map[string]FileChange{
-			"src/a.go":  {},
-			"src/b.go":  {},
-			"docs/x.md": {},
+			"src/a.go":  {Unstaged: true},
+			"src/b.go":  {Unstaged: true},
+			"docs/x.md": {Unstaged: true},
 		},
-		new: map[string]string{
+		worktree: map[string]string{
 			"src/a.go":  "package a\n",
 			"src/b.go":  "package b\n",
 			"docs/x.md": "# doc\n",
@@ -159,11 +264,11 @@ func TestFetchDiff_FilesSorted(t *testing.T) {
 	repo := &fakeRepo{
 		head: HeadInfo{},
 		files: map[string]FileChange{
-			"c.go": {},
-			"a.go": {},
-			"b.go": {},
+			"c.go": {Unstaged: true},
+			"a.go": {Unstaged: true},
+			"b.go": {Unstaged: true},
 		},
-		new: map[string]string{
+		worktree: map[string]string{
 			"c.go": "c\n",
 			"a.go": "a\n",
 			"b.go": "b\n",

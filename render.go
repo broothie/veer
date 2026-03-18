@@ -123,6 +123,9 @@ func renderDiffLine(dl DiffLine, numWidth int) string {
 		return styleGutter.Render(fmt.Sprintf(" %*d + ", numWidth, dl.NewNum)) + styleAddLine.Render(dl.Content)
 	case LineRemoved:
 		return styleGutter.Render(fmt.Sprintf(" %*d - ", numWidth, dl.OldNum)) + styleRemLine.Render(dl.Content)
+	case LineHeader:
+		pad := strings.Repeat("─", numWidth+3)
+		return styleHeader.Render(fmt.Sprintf(" %s %s ", pad, dl.Content))
 	default:
 		return ""
 	}

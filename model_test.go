@@ -28,8 +28,8 @@ func testModel(files []FileDiff) model {
 }
 
 var twoFiles = []FileDiff{
-	{Path: "a.go", Lines: []DiffLine{{Type: LineAdded, NewNum: 1, Content: "pkg a"}}, Added: 1},
-	{Path: "b.go", Lines: []DiffLine{{Type: LineAdded, NewNum: 1, Content: "pkg b"}}, Added: 1},
+	{Path: "a.go", Lines: []DiffLine{{Type: LineAdded, NewNum: 1, Content: "pkg a"}}, Added: 1, Unstaged: true},
+	{Path: "b.go", Lines: []DiffLine{{Type: LineAdded, NewNum: 1, Content: "pkg b"}}, Added: 1, Unstaged: true},
 }
 
 // --- setCursor ---
