@@ -179,9 +179,9 @@ func (m model) renderStatus() string {
 	case focusFiles:
 		parts = append(parts, "enter/l: open  tab: commits  q: quit")
 	case focusCommits:
-		parts = append(parts, "enter: select  tab: diff  h: files  q: quit")
+		parts = append(parts, "enter: select  tab: diff  shift+tab: files  q: quit")
 	case focusDiff:
-		parts = append(parts, "h/tab: files  j/k ↑↓  ^d/^u  q: quit")
+		parts = append(parts, "tab: files  j/k ↑↓  ^f/^b: page  q: quit")
 	}
 
 	return "\n" + styleFaint.Render(" "+strings.Join(parts, "  ·  "))

@@ -260,7 +260,9 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	case "tab":
-		m.cycleTab()
+		m.cycleTab(1)
+	case "shift+tab":
+		m.cycleTab(-1)
 	case "j", "down":
 		m.keyDown()
 	case "k", "up":
@@ -269,40 +271,57 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.keyTop()
 	case "G":
 		m.keyBottom()
-	case "ctrl+d":
-		m.diffScroll(func(v *viewport.Model) { v.HalfViewDown() })
-	case "ctrl+u":
-		m.diffScroll(func(v *viewport.Model) { v.HalfViewUp() })
 	case "ctrl+f":
 		m.diffScroll(func(v *viewport.Model) { v.ViewDown() })
 	case "ctrl+b":
 		m.diffScroll(func(v *viewport.Model) { v.ViewUp() })
 	case "l", "enter":
 		return m.keyOpen()
-	case "h":
-		if m.focus == focusDiff || m.focus == focusCommits {
-			m.focus = focusFiles
-		}
 	}
 	return m, nil
 }
 
-func (m *model) cycleTab() {
+// cycleTab advances focus forward (dir=1) or backward (dir=-1).
+// Order: focusFiles → focusCommits → focusDiff → focusFiles
+func (m *model) cycleTab(dir int) {
+	hasCommits := len(m.commits) > 0
+	hasFiles := len(m.files) > 0
+
 	switch m.focus {
 	case focusFiles:
-		if len(m.commits) > 0 {
-			m.focus = focusCommits
-		} else if len(m.files) > 0 {
-			m.focus = focusDiff
+		if dir > 0 {
+			if hasCommits {
+				m.focus = focusCommits
+			} else if hasFiles {
+				m.focus = focusDiff
+			}
+		} else {
+			if hasFiles {
+				m.focus = focusDiff
+			} else if hasCommits {
+				m.focus = focusCommits
+			}
 		}
 	case focusCommits:
-		if len(m.files) > 0 {
-			m.focus = focusDiff
+		if dir > 0 {
+			if hasFiles {
+				m.focus = focusDiff
+			} else {
+				m.focus = focusFiles
+			}
 		} else {
 			m.focus = focusFiles
 		}
 	case focusDiff:
-		m.focus = focusFiles
+		if dir > 0 {
+			m.focus = focusFiles
+		} else {
+			if hasCommits {
+				m.focus = focusCommits
+			} else {
+				m.focus = focusFiles
+			}
+		}
 	}
 }
 
@@ -510,32 +529,27 @@ func (m *model) handleMouseScroll(msg tea.MouseMsg, dir int) {
 }
 
 func (m *model) scrollCommitList(dir int) {
+	total := len(m.commits) + 1
+	commitH := m.commitListHeight() - m.branchHeaderRows()
 	if dir > 0 {
-		total := len(m.commits) + 1
-		commitH := m.commitListHeight()
-		header := m.branchHeaderRows()
-		maxOff := max(0, total-(commitH-header))
-		if m.commitOffset < maxOff {
-			m.commitOffset++
+		if m.commitCursor < total-1 {
+			m.commitCursor++
 		}
+		maxOff := max(0, total-commitH)
+		m.commitOffset = min(m.commitOffset+1, maxOff)
 	} else {
-		if m.commitOffset > 0 {
-			m.commitOffset--
+		if m.commitCursor > 0 {
+			m.commitCursor--
 		}
+		m.commitOffset = max(0, m.commitOffset-1)
 	}
 }
 
 func (m *model) scrollFileTree(dir int) {
 	if dir > 0 {
-		fileH, _ := m.sidebarSplit()
-		maxOffset := max(0, len(m.tree)-fileH)
-		if m.sidebarOffset < maxOffset {
-			m.sidebarOffset++
-		}
+		m.setCursor(m.cursor + 1)
 	} else {
-		if m.sidebarOffset > 0 {
-			m.sidebarOffset--
-		}
+		m.setCursor(m.cursor - 1)
 	}
 }
 
