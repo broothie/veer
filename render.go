@@ -49,9 +49,6 @@ func (m model) renderHeader() string {
 	if m.cwd != "" {
 		parts = append(parts, styleFaint.Render(m.cwd))
 	}
-	if m.branch != "" {
-		parts = append(parts, styleBranch.Render(m.branch))
-	}
 	if m.sha != "" {
 		parts = append(parts, styleSHA.Render(m.sha))
 	}
@@ -178,9 +175,12 @@ func (m model) renderStatus() string {
 		parts = append(parts, fmt.Sprintf("%d/%d", m.cursor+1, len(m.files)))
 	}
 
-	if m.sidebarFocused {
-		parts = append(parts, "enter/l: open  tab: switch  q: quit")
-	} else {
+	switch m.focus {
+	case focusFiles:
+		parts = append(parts, "enter/l: open  tab: commits  q: quit")
+	case focusCommits:
+		parts = append(parts, "enter: select  tab: diff  h: files  q: quit")
+	case focusDiff:
 		parts = append(parts, "h/tab: files  j/k ↑↓  ^d/^u  q: quit")
 	}
 

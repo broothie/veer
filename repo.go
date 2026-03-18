@@ -3,11 +3,15 @@ package main
 import (
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/go-git/go-billy/v5/osfs"
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
+	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/go-git/go-git/v5/utils/merkletrie"
 )
 
 // gitRepo implements Repo using go-git.
@@ -151,4 +155,115 @@ func (g *gitRepo) WorktreeContent(path string) string {
 		return ""
 	}
 	return string(b)
+}
+
+func (g *gitRepo) Log(n int) ([]CommitInfo, error) {
+	iter, err := g.repo.Log(&git.LogOptions{})
+	if err != nil {
+		return nil, err
+	}
+	defer iter.Close()
+
+	var commits []CommitInfo
+	for i := 0; i < n; i++ {
+		c, err := iter.Next()
+		if err != nil {
+			break
+		}
+
+		sha := c.Hash.String()
+		short := sha
+		if len(short) > 7 {
+			short = short[:7]
+		}
+
+		msg := strings.TrimSpace(c.Message)
+		if idx := strings.IndexByte(msg, '\n'); idx != -1 {
+			msg = msg[:idx]
+		}
+
+		commits = append(commits, CommitInfo{
+			SHA:     short,
+			FullSHA: sha,
+			Message: msg,
+		})
+	}
+	return commits, nil
+}
+
+func (g *gitRepo) DiffCommit(sha string) ([]FileDiff, error) {
+	hash := plumbing.NewHash(sha)
+	commit, err := g.repo.CommitObject(hash)
+	if err != nil {
+		return nil, err
+	}
+
+	commitTree, err := commit.Tree()
+	if err != nil {
+		return nil, err
+	}
+
+	var parentTree *object.Tree
+	if commit.NumParents() > 0 {
+		if parent, err := commit.Parents().Next(); err == nil {
+			parentTree, _ = parent.Tree()
+		}
+	}
+
+	changes, err := object.DiffTree(parentTree, commitTree)
+	if err != nil {
+		return nil, err
+	}
+
+	var files []FileDiff
+	for _, change := range changes {
+		action, err := change.Action()
+		if err != nil {
+			continue
+		}
+
+		var path, oldContent, newContent string
+		switch action {
+		case merkletrie.Insert:
+			path = change.To.Name
+			newContent = treeFileContent(commitTree, path)
+		case merkletrie.Delete:
+			path = change.From.Name
+			oldContent = treeFileContent(parentTree, path)
+		case merkletrie.Modify:
+			path = change.To.Name
+			oldContent = treeFileContent(parentTree, path)
+			newContent = treeFileContent(commitTree, path)
+		}
+
+		lines, added, removed, err := buildDiffLines(path, oldContent, newContent)
+		if err != nil || len(lines) == 0 {
+			continue
+		}
+
+		files = append(files, FileDiff{
+			Path:    path,
+			Lines:   lines,
+			Added:   added,
+			Removed: removed,
+		})
+	}
+
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].Path < files[j].Path
+	})
+	return files, nil
+}
+
+// treeFileContent reads a file's content from a git tree, returning "" on any error.
+func treeFileContent(tree *object.Tree, path string) string {
+	if tree == nil {
+		return ""
+	}
+	f, err := tree.File(path)
+	if err != nil {
+		return ""
+	}
+	content, _ := f.Contents()
+	return content
 }

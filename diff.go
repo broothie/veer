@@ -61,6 +61,13 @@ type FileChange struct {
 	WorktreeDeleted bool
 }
 
+// CommitInfo holds display info for a commit in the log.
+type CommitInfo struct {
+	SHA     string // short (7-char) hash
+	FullSHA string // full hash for lookups
+	Message string // first line of commit message
+}
+
 // Repo abstracts git repository operations needed for diffing.
 type Repo interface {
 	Head() (HeadInfo, error)
@@ -68,6 +75,8 @@ type Repo interface {
 	HeadContent(path string) string
 	IndexContent(path string) string
 	WorktreeContent(path string) string
+	Log(n int) ([]CommitInfo, error)
+	DiffCommit(sha string) ([]FileDiff, error)
 }
 
 // fetchDiff queries the repo and returns diffs along with HEAD metadata.

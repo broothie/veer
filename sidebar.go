@@ -7,6 +7,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+var styleSidebar = lipgloss.NewStyle().PaddingRight(sidebarPad)
+
 // treeEntry is a row in the sidebar: either a directory header or a file.
 type treeEntry struct {
 	name    string
@@ -15,13 +17,52 @@ type treeEntry struct {
 }
 
 func (m model) renderSidebar(height int) string {
+	fileH, commitStart := m.sidebarSplit()
+
+	// File tree section.
+	fileSection := m.renderFileTree(fileH)
+
+	// Separator line.
+	sep := styleFaint.Render(strings.Repeat("─", sidebarWidth))
+
+	// Commit list section.
+	commitH := height - fileH - 1 // -1 for separator
+	commitSection := m.renderCommitList(commitH)
+
+	lines := make([]string, 0, height)
+
+	// File tree lines.
+	fileLines := strings.Split(fileSection, "\n")
+	lines = append(lines, fileLines...)
+	for len(lines) < fileH {
+		lines = append(lines, "")
+	}
+
+	// Separator.
+	lines = append(lines, sep)
+
+	// Commit list lines.
+	commitLines := strings.Split(commitSection, "\n")
+	lines = append(lines, commitLines...)
+	for len(lines) < height {
+		lines = append(lines, "")
+	}
+
+	_ = commitStart
+	return styleSidebar.
+		Width(sidebarWidth + sidebarPad).
+		Height(height).
+		Render(strings.Join(lines[:height], "\n"))
+}
+
+func (m model) renderFileTree(height int) string {
 	if len(m.tree) == 0 {
 		msg := "no changes"
 		if m.err != nil {
 			msg = "error"
 		}
-		return styleSidebar.
-			Width(sidebarWidth + sidebarPad).
+		return lipgloss.NewStyle().
+			Width(sidebarWidth).
 			Height(height).
 			Align(lipgloss.Center, lipgloss.Center).
 			Render(styleFaint.Render(msg))
@@ -35,10 +76,89 @@ func (m model) renderSidebar(height int) string {
 		lines = append(lines, m.renderTreeEntry(entry))
 	}
 
-	return styleSidebar.
-		Width(sidebarWidth + sidebarPad).
-		Height(height).
-		Render(strings.Join(lines, "\n"))
+	return strings.Join(lines, "\n")
+}
+
+func (m model) renderCommitList(height int) string {
+	if height < 1 {
+		return ""
+	}
+
+	var lines []string
+
+	// Branch/ref header.
+	branch := m.branch
+	if branch == "" && m.sha != "" {
+		branch = m.sha
+	}
+	if branch != "" {
+		lines = append(lines, styleBranch.Render(" "+branch))
+		height-- // consume one row
+	}
+
+	total := len(m.commits) + 1 // +1 for working tree entry
+
+	start := m.commitOffset
+	end := min(start+height, total)
+
+	for i := start; i < end; i++ {
+		if i == 0 {
+			// Working tree entry.
+			prefix := "  "
+			if m.commitCursor == 0 && m.focus == focusCommits {
+				prefix = "> "
+			}
+			label := "working tree"
+			if m.selectedCommit == -1 {
+				label = styleActive.Render("● ") + label
+			} else {
+				label = styleFaint.Render("○ ") + label
+			}
+			line := prefix + label
+			if m.commitCursor == 0 && m.focus == focusCommits {
+				line = prefix + label
+			}
+			lines = append(lines, line)
+		} else {
+			ci := i - 1
+			if ci >= len(m.commits) {
+				continue
+			}
+			c := m.commits[ci]
+
+			prefix := "  "
+			if m.commitCursor == i && m.focus == focusCommits {
+				prefix = "> "
+			}
+
+			sha := styleSHA.Render(c.SHA)
+
+			// Truncate message to fit.
+			usedWidth := lipgloss.Width(prefix) + lipgloss.Width(c.SHA) + 3 // 3 for "● " + space
+			msgMax := sidebarWidth - usedWidth
+			msg := c.Message
+			if len(msg) > msgMax && msgMax > 3 {
+				msg = msg[:msgMax-1] + "…"
+			} else if msgMax <= 3 {
+				msg = ""
+			}
+
+			var marker string
+			if m.selectedCommit == ci {
+				marker = styleActive.Render("● ")
+			} else {
+				marker = styleFaint.Render("○ ")
+			}
+
+			line := prefix + marker + sha + " " + msg
+			if m.commitCursor == i && m.focus == focusCommits {
+				// Already has > prefix, that's enough.
+			}
+			lines = append(lines, line)
+		}
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 func (m model) renderTreeEntry(e treeEntry) string {
@@ -91,7 +211,7 @@ func (m model) renderTreeEntry(e treeEntry) string {
 
 	if e.fileIdx == m.cursor {
 		nameStr := prefix + name
-		if m.sidebarFocused {
+		if m.focus == focusFiles {
 			return indent + styleActive.Render(nameStr) + padding + coloredDelta
 		}
 		return indent + styleBold.Render(nameStr) + padding + coloredDelta

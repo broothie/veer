@@ -14,7 +14,7 @@ func testModel(files []FileDiff) model {
 	m := model{
 		files:          files,
 		tree:           buildTree(files),
-		sidebarFocused: true,
+		focus:          focusFiles,
 		width:          120,
 		height:         40,
 		viewport:       viewport.New(80, 36),
@@ -22,6 +22,7 @@ func testModel(files []FileDiff) model {
 		branch:         "main",
 		sha:            "abc1234",
 		message:        "test commit",
+		selectedCommit: -1,
 	}
 	content := m.buildDiffContent()
 	m.viewport.SetContent(content)
@@ -89,7 +90,7 @@ func TestHandleKey_Quit(t *testing.T) {
 
 func TestHandleKey_JK_SidebarNavigation(t *testing.T) {
 	m := testModel(twoFiles)
-	m.sidebarFocused = true
+	m.focus = focusFiles
 
 	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 	m = result.(model)
@@ -106,7 +107,7 @@ func TestHandleKey_JK_SidebarNavigation(t *testing.T) {
 
 func TestHandleKey_G_FirstLast(t *testing.T) {
 	m := testModel(twoFiles)
-	m.sidebarFocused = true
+	m.focus = focusFiles
 
 	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'G'}})
 	m = result.(model)
@@ -121,53 +122,77 @@ func TestHandleKey_G_FirstLast(t *testing.T) {
 	}
 }
 
-func TestHandleKey_Tab_TogglesFocus(t *testing.T) {
+func TestHandleKey_Tab_CyclesFocus(t *testing.T) {
 	m := testModel(twoFiles)
-	m.sidebarFocused = true
+	m.focus = focusFiles
+	m.commits = []CommitInfo{{SHA: "abc1234", FullSHA: "abc1234full", Message: "test"}}
 
+	// files -> commits
 	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m = result.(model)
-	if m.sidebarFocused {
-		t.Error("tab should switch to diff pane")
+	if m.focus != focusCommits {
+		t.Errorf("tab from files: focus = %d, want focusCommits", m.focus)
 	}
 
+	// commits -> diff
 	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m = result.(model)
-	if !m.sidebarFocused {
-		t.Error("tab should switch back to sidebar")
+	if m.focus != focusDiff {
+		t.Errorf("tab from commits: focus = %d, want focusDiff", m.focus)
+	}
+
+	// diff -> files
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = result.(model)
+	if m.focus != focusFiles {
+		t.Errorf("tab from diff: focus = %d, want focusFiles", m.focus)
+	}
+}
+
+func TestHandleKey_Tab_SkipsCommitsWhenEmpty(t *testing.T) {
+	m := testModel(twoFiles)
+	m.focus = focusFiles
+
+	// No commits: files -> diff (skip commits)
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = result.(model)
+	if m.focus != focusDiff {
+		t.Errorf("tab with no commits: focus = %d, want focusDiff", m.focus)
 	}
 }
 
 func TestHandleKey_Tab_NoToggleWhenEmpty(t *testing.T) {
 	m := testModel(nil)
-	m.sidebarFocused = true
+	m.focus = focusFiles
 
 	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m = result.(model)
-	if !m.sidebarFocused {
+	// No files and no commits: should stay on focusFiles or go to commits
+	// With no commits and no files, tab from files goes nowhere useful
+	if m.focus == focusDiff {
 		t.Error("tab should not switch to diff when no files")
 	}
 }
 
 func TestHandleKey_Enter_OpensDiff(t *testing.T) {
 	m := testModel(twoFiles)
-	m.sidebarFocused = true
+	m.focus = focusFiles
 
 	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = result.(model)
-	if m.sidebarFocused {
+	if m.focus != focusDiff {
 		t.Error("enter should switch focus to diff")
 	}
 }
 
 func TestHandleKey_H_BackToSidebar(t *testing.T) {
 	m := testModel(twoFiles)
-	m.sidebarFocused = false
+	m.focus = focusDiff
 
 	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
 	m = result.(model)
-	if !m.sidebarFocused {
-		t.Error("h should switch focus to sidebar")
+	if m.focus != focusFiles {
+		t.Error("h should switch focus to files")
 	}
 }
 
@@ -256,9 +281,6 @@ func TestRenderHeader_ContainsParts(t *testing.T) {
 	if !strings.Contains(header, "proj") {
 		t.Error("header should contain cwd")
 	}
-	if !strings.Contains(header, "main") {
-		t.Error("header should contain branch")
-	}
 	if !strings.Contains(header, "abc1234") {
 		t.Error("header should contain SHA")
 	}
@@ -311,16 +333,22 @@ func TestRenderStatus_WithError(t *testing.T) {
 	}
 }
 
-func TestRenderStatus_SidebarHints(t *testing.T) {
+func TestRenderStatus_FocusHints(t *testing.T) {
 	m := testModel(twoFiles)
 
-	m.sidebarFocused = true
+	m.focus = focusFiles
 	status := m.renderStatus()
 	if !strings.Contains(status, "enter/l: open") {
-		t.Error("sidebar-focused status should show sidebar hints")
+		t.Error("file-focused status should show file hints")
 	}
 
-	m.sidebarFocused = false
+	m.focus = focusCommits
+	status = m.renderStatus()
+	if !strings.Contains(status, "enter: select") {
+		t.Error("commit-focused status should show commit hints")
+	}
+
+	m.focus = focusDiff
 	status = m.renderStatus()
 	if !strings.Contains(status, "h/tab: files") {
 		t.Error("diff-focused status should show diff hints")
@@ -449,7 +477,7 @@ func TestRenderTreeEntry_Directory(t *testing.T) {
 func TestRenderTreeEntry_SelectedFile(t *testing.T) {
 	m := testModel(twoFiles)
 	m.cursor = 0
-	m.sidebarFocused = true
+	m.focus = focusFiles
 
 	entry := treeEntry{name: "a.go", fileIdx: 0, depth: 0}
 	result := m.renderTreeEntry(entry)

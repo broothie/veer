@@ -55,3 +55,5 @@ Mouse: click to select files, scroll wheel to navigate or scroll.
 - [x] Continuous scroll
 - [x] Refactor everything
 - [ ] Expandable ellipsis
+- [ ] Rethink keybinds
+- [ ] Hunk/file/line staging and committing
