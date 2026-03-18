@@ -1,0 +1,507 @@
+package main
+
+import (
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+)
+
+func testModel(files []FileDiff) model {
+	m := model{
+		files:          files,
+		tree:           buildTree(files),
+		sidebarFocused: true,
+		width:          120,
+		height:         40,
+		viewport:       viewport.New(80, 36),
+		cwd:            "~/proj",
+		branch:         "main",
+		sha:            "abc1234",
+		message:        "test commit",
+	}
+	m.viewport.SetContent(m.buildDiffContent())
+	return m
+}
+
+var twoFiles = []FileDiff{
+	{Path: "a.go", Lines: []DiffLine{{Type: LineAdded, NewNum: 1, Content: "pkg a"}}, Added: 1},
+	{Path: "b.go", Lines: []DiffLine{{Type: LineAdded, NewNum: 1, Content: "pkg b"}}, Added: 1},
+}
+
+// --- setCursor ---
+
+func TestSetCursor(t *testing.T) {
+	m := testModel(twoFiles)
+
+	m.setCursor(1)
+	if m.cursor != 1 {
+		t.Errorf("cursor = %d, want 1", m.cursor)
+	}
+}
+
+func TestSetCursor_NopOnSameIndex(t *testing.T) {
+	m := testModel(twoFiles)
+	gen := m.diffGen
+
+	m.setCursor(0) // already at 0
+	if m.diffGen != gen {
+		t.Error("diffGen should not change when cursor doesn't move")
+	}
+}
+
+func TestSetCursor_BoundsCheck(t *testing.T) {
+	m := testModel(twoFiles)
+
+	m.setCursor(-1)
+	if m.cursor != 0 {
+		t.Error("negative index should be ignored")
+	}
+
+	m.setCursor(99)
+	if m.cursor != 0 {
+		t.Error("out-of-range index should be ignored")
+	}
+}
+
+// --- handleKey ---
+
+func TestHandleKey_Quit(t *testing.T) {
+	m := testModel(twoFiles)
+
+	for _, key := range []string{"q", "ctrl+c"} {
+		_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
+		if key == "q" {
+			// tea.KeyMsg for "q" is runes
+			result, cmd2 := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+			_ = result
+			if cmd2 == nil {
+				t.Error("q should return a quit command")
+			}
+		}
+		_ = cmd
+	}
+}
+
+func TestHandleKey_JK_SidebarNavigation(t *testing.T) {
+	m := testModel(twoFiles)
+	m.sidebarFocused = true
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m = result.(model)
+	if m.cursor != 1 {
+		t.Errorf("j: cursor = %d, want 1", m.cursor)
+	}
+
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	m = result.(model)
+	if m.cursor != 0 {
+		t.Errorf("k: cursor = %d, want 0", m.cursor)
+	}
+}
+
+func TestHandleKey_G_FirstLast(t *testing.T) {
+	m := testModel(twoFiles)
+	m.sidebarFocused = true
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'G'}})
+	m = result.(model)
+	if m.cursor != 1 {
+		t.Errorf("G: cursor = %d, want 1", m.cursor)
+	}
+
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	m = result.(model)
+	if m.cursor != 0 {
+		t.Errorf("g: cursor = %d, want 0", m.cursor)
+	}
+}
+
+func TestHandleKey_Tab_TogglesFocus(t *testing.T) {
+	m := testModel(twoFiles)
+	m.sidebarFocused = true
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = result.(model)
+	if m.sidebarFocused {
+		t.Error("tab should switch to diff pane")
+	}
+
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = result.(model)
+	if !m.sidebarFocused {
+		t.Error("tab should switch back to sidebar")
+	}
+}
+
+func TestHandleKey_Tab_NoToggleWhenEmpty(t *testing.T) {
+	m := testModel(nil)
+	m.sidebarFocused = true
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = result.(model)
+	if !m.sidebarFocused {
+		t.Error("tab should not switch to diff when no files")
+	}
+}
+
+func TestHandleKey_Enter_OpensDiff(t *testing.T) {
+	m := testModel(twoFiles)
+	m.sidebarFocused = true
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = result.(model)
+	if m.sidebarFocused {
+		t.Error("enter should switch focus to diff")
+	}
+}
+
+func TestHandleKey_H_BackToSidebar(t *testing.T) {
+	m := testModel(twoFiles)
+	m.sidebarFocused = false
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	m = result.(model)
+	if !m.sidebarFocused {
+		t.Error("h should switch focus to sidebar")
+	}
+}
+
+// --- Update: diffResultMsg ---
+
+func TestUpdate_DiffResult_PreservesCursor(t *testing.T) {
+	m := testModel(twoFiles)
+	m.cursor = 1 // on b.go
+
+	// Simulate a refresh that returns the same files.
+	msg := diffResultMsg{
+		result: &DiffResult{
+			Branch:  "main",
+			SHA:     "def5678",
+			Message: "update",
+			Files:   twoFiles,
+		},
+	}
+
+	result, _ := m.Update(msg)
+	m = result.(model)
+
+	if m.cursor != 1 {
+		t.Errorf("cursor = %d, want 1 (should preserve position on b.go)", m.cursor)
+	}
+}
+
+func TestUpdate_DiffResult_ClampsCursor(t *testing.T) {
+	m := testModel(twoFiles)
+	m.cursor = 1
+
+	// File list shrinks to 1 file.
+	msg := diffResultMsg{
+		result: &DiffResult{
+			Files: twoFiles[:1],
+		},
+	}
+
+	result, _ := m.Update(msg)
+	m = result.(model)
+
+	if m.cursor != 0 {
+		t.Errorf("cursor = %d, want 0 (should clamp when files shrink)", m.cursor)
+	}
+}
+
+// --- Update: tickMsg with fetch guard ---
+
+func TestUpdate_TickMsg_SkipsWhenFetching(t *testing.T) {
+	m := testModel(twoFiles)
+	m.fetching = true
+
+	result, cmd := m.Update(tickMsg{})
+	m = result.(model)
+
+	if !m.fetching {
+		t.Error("fetching should remain true")
+	}
+	// Should return a tick cmd but not a fetch cmd.
+	if cmd == nil {
+		t.Error("should still schedule next tick")
+	}
+}
+
+func TestUpdate_TickMsg_FetchesWhenIdle(t *testing.T) {
+	m := testModel(twoFiles)
+	m.fetching = false
+
+	result, cmd := m.Update(tickMsg{})
+	m = result.(model)
+
+	if !m.fetching {
+		t.Error("fetching should be set to true")
+	}
+	if cmd == nil {
+		t.Error("should return batch cmd")
+	}
+}
+
+// --- renderHeader ---
+
+func TestRenderHeader_ContainsParts(t *testing.T) {
+	m := testModel(twoFiles)
+	header := m.renderHeader()
+
+	if !strings.Contains(header, "proj") {
+		t.Error("header should contain cwd")
+	}
+	if !strings.Contains(header, "main") {
+		t.Error("header should contain branch")
+	}
+	if !strings.Contains(header, "abc1234") {
+		t.Error("header should contain SHA")
+	}
+	if !strings.Contains(header, "test commit") {
+		t.Error("header should contain message")
+	}
+}
+
+func TestRenderHeader_TruncatesLongMessage(t *testing.T) {
+	m := testModel(twoFiles)
+	m.width = 50
+	m.message = "this is a very long commit message that should be truncated"
+
+	header := m.renderHeader()
+	if lipgloss.Width(header) > m.width+1 { // +1 for trailing newline
+		t.Errorf("header width %d exceeds terminal width %d", lipgloss.Width(header), m.width)
+	}
+}
+
+func TestRenderHeader_NoMessage(t *testing.T) {
+	m := testModel(twoFiles)
+	m.message = ""
+	header := m.renderHeader()
+	if strings.Contains(header, "test commit") {
+		t.Error("should not contain message when empty")
+	}
+}
+
+// --- renderStatus ---
+
+func TestRenderStatus_WithFiles(t *testing.T) {
+	m := testModel(twoFiles)
+	status := m.renderStatus()
+
+	if !strings.Contains(status, "2 files") {
+		t.Error("status should show file count")
+	}
+	if !strings.Contains(status, "1/2") {
+		t.Error("status should show cursor position")
+	}
+}
+
+func TestRenderStatus_WithError(t *testing.T) {
+	m := testModel(nil)
+	m.err = errors.New("test error")
+	status := m.renderStatus()
+
+	if !strings.Contains(status, "test error") {
+		t.Error("status should show error")
+	}
+}
+
+func TestRenderStatus_SidebarHints(t *testing.T) {
+	m := testModel(twoFiles)
+
+	m.sidebarFocused = true
+	status := m.renderStatus()
+	if !strings.Contains(status, "enter/l: open") {
+		t.Error("sidebar-focused status should show sidebar hints")
+	}
+
+	m.sidebarFocused = false
+	status = m.renderStatus()
+	if !strings.Contains(status, "h/tab: files") {
+		t.Error("diff-focused status should show diff hints")
+	}
+}
+
+// --- buildDiffContent ---
+
+func TestBuildDiffContent_NoFiles(t *testing.T) {
+	m := testModel(nil)
+	content := m.buildDiffContent()
+	if !strings.Contains(content, "no changes") {
+		t.Error("empty file list should show 'no changes'")
+	}
+}
+
+func TestBuildDiffContent_RendersDiff(t *testing.T) {
+	m := testModel(twoFiles)
+	content := m.buildDiffContent()
+	if !strings.Contains(content, "pkg a") {
+		t.Error("should render first file's diff content")
+	}
+}
+
+func TestBuildDiffContent_CursorOutOfRange(t *testing.T) {
+	m := testModel(twoFiles)
+	m.cursor = 99
+	content := m.buildDiffContent()
+	if content != "" {
+		t.Error("out-of-range cursor should return empty string")
+	}
+}
+
+// --- renderDiffLine ---
+
+func TestRenderDiffLine_AllTypes(t *testing.T) {
+	tests := []struct {
+		name string
+		dl   DiffLine
+		want string
+	}{
+		{"context", DiffLine{Type: LineContext, OldNum: 5, NewNum: 5, Content: "hello"}, "hello"},
+		{"added", DiffLine{Type: LineAdded, NewNum: 3, Content: "new"}, "new"},
+		{"removed", DiffLine{Type: LineRemoved, OldNum: 3, Content: "old"}, "old"},
+		{"separator", DiffLine{Type: LineSeparator}, "…"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := renderDiffLine(tt.dl, 3)
+			if !strings.Contains(result, tt.want) {
+				t.Errorf("renderDiffLine(%s) = %q, should contain %q", tt.name, result, tt.want)
+			}
+		})
+	}
+}
+
+// --- cursorTreeRow ---
+
+func TestCursorTreeRow(t *testing.T) {
+	files := []FileDiff{
+		{Path: "dir/a.go"},
+		{Path: "dir/b.go"},
+	}
+	m := testModel(files)
+	// tree: dir/ (idx -1), a.go (idx 0), b.go (idx 1)
+
+	m.cursor = 0
+	if row := m.cursorTreeRow(); row != 1 {
+		t.Errorf("cursor 0 -> row %d, want 1 (after dir header)", row)
+	}
+
+	m.cursor = 1
+	if row := m.cursorTreeRow(); row != 2 {
+		t.Errorf("cursor 1 -> row %d, want 2", row)
+	}
+}
+
+func TestCursorTreeRow_Empty(t *testing.T) {
+	m := testModel(nil)
+	if row := m.cursorTreeRow(); row != 0 {
+		t.Errorf("empty tree -> row %d, want 0", row)
+	}
+}
+
+// --- renderSidebar ---
+
+func TestRenderSidebar_NoChanges(t *testing.T) {
+	m := testModel(nil)
+	sidebar := m.renderSidebar(20)
+	if !strings.Contains(sidebar, "no changes") {
+		t.Error("empty sidebar should show 'no changes'")
+	}
+}
+
+func TestRenderSidebar_WithError(t *testing.T) {
+	m := testModel(nil)
+	m.err = errors.New("fail")
+	sidebar := m.renderSidebar(20)
+	if !strings.Contains(sidebar, "error") {
+		t.Error("sidebar with error should show 'error'")
+	}
+}
+
+func TestRenderSidebar_ShowsFiles(t *testing.T) {
+	m := testModel(twoFiles)
+	sidebar := m.renderSidebar(20)
+	if !strings.Contains(sidebar, "a.go") || !strings.Contains(sidebar, "b.go") {
+		t.Error("sidebar should show file names")
+	}
+}
+
+// --- renderTreeEntry ---
+
+func TestRenderTreeEntry_Directory(t *testing.T) {
+	m := testModel(twoFiles)
+	entry := treeEntry{name: "src/", fileIdx: -1, depth: 0}
+	result := m.renderTreeEntry(entry)
+	if !strings.Contains(result, "src/") {
+		t.Error("directory entry should contain dir name")
+	}
+}
+
+func TestRenderTreeEntry_SelectedFile(t *testing.T) {
+	m := testModel(twoFiles)
+	m.cursor = 0
+	m.sidebarFocused = true
+
+	entry := treeEntry{name: "a.go", fileIdx: 0, depth: 0}
+	result := m.renderTreeEntry(entry)
+	if !strings.Contains(result, ">") {
+		t.Error("selected file should have > prefix")
+	}
+	if !strings.Contains(result, "a.go") {
+		t.Error("selected file should contain filename")
+	}
+}
+
+func TestRenderTreeEntry_UnselectedFile(t *testing.T) {
+	m := testModel(twoFiles)
+	m.cursor = 0
+
+	entry := treeEntry{name: "b.go", fileIdx: 1, depth: 0}
+	result := m.renderTreeEntry(entry)
+	if strings.Contains(result, ">") {
+		t.Error("unselected file should not have > prefix")
+	}
+}
+
+// --- View ---
+
+func TestView_EmptyWhenNoWidth(t *testing.T) {
+	m := testModel(twoFiles)
+	m.width = 0
+	if m.View() != "" {
+		t.Error("View should return empty string when width is 0")
+	}
+}
+
+// --- rebuildDiffContent ---
+
+func TestRebuildDiffContent_SkipsWhenCached(t *testing.T) {
+	m := testModel(twoFiles)
+	m.diffGen = 5
+	m.lastBuiltGen = 5
+
+	// Should be a no-op (we can't easily assert this, but it shouldn't panic).
+	m.rebuildDiffContent()
+
+	if m.lastBuiltGen != 5 {
+		t.Error("lastBuiltGen should not change when cached")
+	}
+}
+
+func TestRebuildDiffContent_RebuildsOnGenChange(t *testing.T) {
+	m := testModel(twoFiles)
+	m.diffGen = 2
+	m.lastBuiltGen = 1
+
+	m.rebuildDiffContent()
+
+	if m.lastBuiltGen != 2 {
+		t.Errorf("lastBuiltGen = %d, want 2", m.lastBuiltGen)
+	}
+}
