@@ -11,34 +11,62 @@ import (
 	"github.com/pmezard/go-difflib/difflib"
 )
 
-// FileDiff holds the displayable diff lines for a single file.
-type FileDiff struct {
-	Path  string
-	Lines []string
+// DiffResult holds everything needed to render the UI.
+type DiffResult struct {
+	Branch  string
+	SHA     string // short (7-char) hash
+	Message string // first line of commit message
+	Files   []FileDiff
 }
 
-// fetchDiff opens the nearest git repository and returns unstaged diffs.
-// args may contain path filters (same semantics as `git diff -- <paths>`).
-func fetchDiff(args []string) ([]FileDiff, error) {
+// FileDiff holds the displayable diff lines for a single file.
+type FileDiff struct {
+	Path    string
+	Lines   []string
+	Added   int
+	Removed int
+}
+
+// fetchDiff opens the nearest git repository and returns unstaged diffs
+// along with HEAD metadata.
+func fetchDiff(args []string) (*DiffResult, error) {
 	repo, err := git.PlainOpenWithOptions(".", &git.PlainOpenOptions{DetectDotGit: true})
 	if err != nil {
 		return nil, fmt.Errorf("not a git repository")
 	}
 
+	result := &DiffResult{}
+
+	// Populate branch / commit info from HEAD.
+	if ref, err := repo.Head(); err == nil {
+		result.Branch = ref.Name().Short()
+		hash := ref.Hash().String()
+		if len(hash) > 7 {
+			hash = hash[:7]
+		}
+		result.SHA = hash
+
+		if commit, err := repo.CommitObject(ref.Hash()); err == nil {
+			msg := strings.TrimSpace(commit.Message)
+			if idx := strings.IndexByte(msg, '\n'); idx != -1 {
+				msg = msg[:idx]
+			}
+			result.Message = msg
+		}
+	}
+
 	wt, err := repo.Worktree()
 	if err != nil {
-		return nil, err
+		return result, err
 	}
 
 	status, err := wt.Status()
 	if err != nil {
-		return nil, err
+		return result, err
 	}
 
-	// Optional path filters (args after "--", or any non-flag arg).
 	pathFilters := pathFiltersFrom(args)
 
-	// Collect paths with worktree-level changes (unstaged), sorted for stable order.
 	var paths []string
 	for path, fs := range status {
 		if fs.Worktree == git.Unmodified || fs.Worktree == git.Untracked {
@@ -51,17 +79,14 @@ func fetchDiff(args []string) ([]FileDiff, error) {
 	}
 	sort.Strings(paths)
 
-	var files []FileDiff
 	for _, path := range paths {
 		fs := status[path]
 
-		// Old content: indexed (staged) version, falling back to HEAD.
 		old, err := indexedContent(repo, path)
 		if err != nil {
 			old = headContent(repo, path)
 		}
 
-		// New content: current file on disk (empty for deletions).
 		var new string
 		if fs.Worktree != git.Deleted {
 			if data, err := readFromFS(wt, path); err == nil {
@@ -74,10 +99,31 @@ func fetchDiff(args []string) ([]FileDiff, error) {
 			continue
 		}
 
-		files = append(files, FileDiff{Path: path, Lines: lines})
+		added, removed := countDeltas(lines)
+		result.Files = append(result.Files, FileDiff{
+			Path:    path,
+			Lines:   lines,
+			Added:   added,
+			Removed: removed,
+		})
 	}
 
-	return files, nil
+	return result, nil
+}
+
+// countDeltas counts added and removed lines, ignoring diff headers.
+func countDeltas(lines []string) (added, removed int) {
+	for _, line := range lines {
+		switch {
+		case strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "---"):
+			// skip diff headers
+		case strings.HasPrefix(line, "+"):
+			added++
+		case strings.HasPrefix(line, "-"):
+			removed++
+		}
+	}
+	return
 }
 
 // indexedContent reads a file's content from the git index (staging area).

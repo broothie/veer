@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -11,8 +12,10 @@ import (
 )
 
 const (
-	sidebarWidth    = 28
+	sidebarWidth    = 30
 	refreshInterval = 500 * time.Millisecond
+	headerHeight    = 1
+	statusHeight    = 1
 )
 
 var (
@@ -22,6 +25,9 @@ var (
 	styleFaint  = lipgloss.NewStyle().Faint(true)
 	styleBold   = lipgloss.NewStyle().Bold(true)
 	styleActive = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("2"))
+	styleBranch = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
+	styleSHA    = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+	styleDir    = lipgloss.NewStyle().Faint(true)
 
 	styleSidebar = lipgloss.NewStyle().
 			BorderRight(true).
@@ -29,17 +35,29 @@ var (
 			BorderForeground(lipgloss.Color("240"))
 )
 
+// treeEntry is a row in the sidebar: either a directory header or a file.
+type treeEntry struct {
+	name    string
+	fileIdx int // -1 for directory headers
+	depth   int
+}
+
 type (
-	tickMsg      struct{}
+	tickMsg       struct{}
 	diffResultMsg struct {
-		files []FileDiff
-		err   error
+		result *DiffResult
+		err    error
 	}
 )
 
 type model struct {
 	gitArgs        []string
 	files          []FileDiff
+	tree           []treeEntry
+	branch         string
+	sha            string
+	message        string
+	cwd            string
 	cursor         int
 	sidebarOffset  int
 	viewport       viewport.Model
@@ -50,9 +68,14 @@ type model struct {
 }
 
 func newModel(args []string) model {
+	cwd, _ := os.Getwd()
+	if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(cwd, home) {
+		cwd = "~" + cwd[len(home):]
+	}
 	return model{
 		gitArgs:        args,
 		sidebarFocused: true,
+		cwd:            cwd,
 	}
 }
 
@@ -66,8 +89,8 @@ func tickCmd() tea.Cmd {
 
 func fetchCmd(args []string) tea.Cmd {
 	return func() tea.Msg {
-		files, err := fetchDiff(args)
-		return diffResultMsg{files, err}
+		result, err := fetchDiff(args)
+		return diffResultMsg{result, err}
 	}
 }
 
@@ -77,7 +100,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		vpWidth := max(1, m.width-sidebarWidth-1)
-		vpHeight := m.height - 1 // 1 line for status bar
+		vpHeight := m.mainHeight()
 		m.viewport = viewport.New(vpWidth, vpHeight)
 		m.viewport.SetContent(m.buildDiffContent())
 
@@ -86,15 +109,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case diffResultMsg:
 		m.err = msg.err
-		if msg.err == nil {
+		if msg.result != nil {
+			m.branch = msg.result.Branch
+			m.sha = msg.result.SHA
+			m.message = msg.result.Message
+
 			prevPath := ""
 			if m.cursor < len(m.files) {
 				prevPath = m.files[m.cursor].Path
 			}
 
-			m.files = msg.files
+			m.files = msg.result.Files
+			m.tree = buildTree(m.files)
 
-			// Try to preserve cursor position on the same file after refresh.
 			found := false
 			if prevPath != "" {
 				for i, f := range m.files {
@@ -105,10 +132,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			}
-			if !found {
-				if m.cursor >= len(m.files) {
-					m.cursor = max(0, len(m.files)-1)
-				}
+			if !found && m.cursor >= len(m.files) {
+				m.cursor = max(0, len(m.files)-1)
 			}
 			m.viewport.SetContent(m.buildDiffContent())
 		}
@@ -121,6 +146,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func (m model) mainHeight() int {
+	return max(1, m.height-headerHeight-statusHeight)
 }
 
 func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -218,16 +247,18 @@ func (m model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			break
 		}
 		if inSidebar {
-			// Click on a file in the sidebar.
-			idx := m.sidebarOffset + msg.Y
-			if idx >= 0 && idx < len(m.files) {
-				m.cursor = idx
-				m.sidebarFocused = false
-				m.viewport.SetContent(m.buildDiffContent())
-				m.viewport.GotoTop()
+			// Map click Y (relative to main area) to a tree entry.
+			row := m.sidebarOffset + (msg.Y - headerHeight)
+			if row >= 0 && row < len(m.tree) {
+				entry := m.tree[row]
+				if entry.fileIdx >= 0 {
+					m.cursor = entry.fileIdx
+					m.sidebarFocused = false
+					m.viewport.SetContent(m.buildDiffContent())
+					m.viewport.GotoTop()
+				}
 			}
 		} else {
-			// Click in the diff panel focuses it.
 			m.sidebarFocused = false
 		}
 
@@ -282,55 +313,86 @@ func colorDiffLine(line string) string {
 	}
 }
 
+// --- View rendering ---
+
 func (m model) View() string {
 	if m.width == 0 {
 		return ""
 	}
 
-	mainHeight := m.height - 1
+	header := m.renderHeader()
 
-	// Keep cursor visible in sidebar scroll region.
-	if m.cursor < m.sidebarOffset {
-		m.sidebarOffset = m.cursor
-	} else if m.cursor >= m.sidebarOffset+mainHeight {
-		m.sidebarOffset = m.cursor - mainHeight + 1
+	mainH := m.mainHeight()
+
+	// Keep cursor's tree row visible in sidebar scroll region.
+	cursorRow := m.cursorTreeRow()
+	if cursorRow < m.sidebarOffset {
+		m.sidebarOffset = cursorRow
+	} else if cursorRow >= m.sidebarOffset+mainH {
+		m.sidebarOffset = cursorRow - mainH + 1
 	}
 
-	sidebar := m.renderSidebar(mainHeight)
+	sidebar := m.renderSidebar(mainH)
 	content := m.viewport.View()
 
 	main := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, content)
 	status := m.renderStatus()
 
-	return lipgloss.JoinVertical(lipgloss.Left, main, status)
+	return lipgloss.JoinVertical(lipgloss.Left, header, main, status)
+}
+
+func (m model) renderHeader() string {
+	var parts []string
+
+	if m.branch != "" {
+		parts = append(parts, styleBranch.Render(m.branch))
+	}
+	if m.sha != "" {
+		parts = append(parts, styleSHA.Render(m.sha))
+	}
+	if m.message != "" {
+		parts = append(parts, m.message)
+	}
+	if m.cwd != "" {
+		parts = append(parts, styleFaint.Render(m.cwd))
+	}
+
+	line := strings.Join(parts, styleFaint.Render(" · "))
+
+	// Truncate to terminal width.
+	if lipgloss.Width(line) > m.width {
+		// Rough truncation — rebuild without message or shorten it.
+		var short []string
+		if m.branch != "" {
+			short = append(short, styleBranch.Render(m.branch))
+		}
+		if m.sha != "" {
+			short = append(short, styleSHA.Render(m.sha))
+		}
+		if m.cwd != "" {
+			short = append(short, styleFaint.Render(m.cwd))
+		}
+		line = strings.Join(short, styleFaint.Render(" · "))
+	}
+
+	return " " + line
 }
 
 func (m model) renderSidebar(height int) string {
 	var lines []string
 
-	if len(m.files) == 0 {
+	if len(m.tree) == 0 {
 		msg := "no changes"
 		if m.err != nil {
 			msg = "error"
 		}
 		lines = append(lines, styleFaint.Render(msg))
 	} else {
-		// Scroll the list to keep the cursor visible.
 		start := m.sidebarOffset
-		end := min(start+height, len(m.files))
+		end := min(start+height, len(m.tree))
 
-		for i := start; i < end; i++ {
-			name := trimPath(m.files[i].Path, sidebarWidth-3)
-			entry := "  " + name
-			if i == m.cursor {
-				entry = "> " + name
-				if m.sidebarFocused {
-					entry = styleActive.Render(entry)
-				} else {
-					entry = styleBold.Render(entry)
-				}
-			}
-			lines = append(lines, entry)
+		for _, entry := range m.tree[start:end] {
+			lines = append(lines, m.renderTreeEntry(entry))
 		}
 	}
 
@@ -340,13 +402,69 @@ func (m model) renderSidebar(height int) string {
 		Render(strings.Join(lines, "\n"))
 }
 
+func (m model) renderTreeEntry(e treeEntry) string {
+	indent := strings.Repeat("  ", e.depth)
+
+	if e.fileIdx < 0 {
+		// Directory header.
+		return styleDir.Render(indent + e.name)
+	}
+
+	f := m.files[e.fileIdx]
+
+	// Build delta string: "+N -M"
+	delta := fmt.Sprintf("+%d -%d", f.Added, f.Removed)
+	coloredDelta := styleAdd.Render(fmt.Sprintf("+%d", f.Added)) + " " + styleRem.Render(fmt.Sprintf("-%d", f.Removed))
+
+	// Available space: sidebarWidth - indent - cursor prefix - gap - delta
+	prefix := "  "
+	if e.fileIdx == m.cursor {
+		prefix = "> "
+	}
+
+	nameMaxLen := sidebarWidth - len(indent) - len(prefix) - len(delta) - 1 // 1 for gap
+	name := e.name
+	if len(name) > nameMaxLen && nameMaxLen > 3 {
+		name = name[:nameMaxLen-1] + "…"
+	}
+
+	// Pad between name and delta.
+	gap := sidebarWidth - len(indent) - len(prefix) - len(name) - len(delta)
+	if gap < 1 {
+		gap = 1
+	}
+	padding := strings.Repeat(" ", gap)
+
+	line := indent + prefix + name + padding + coloredDelta
+
+	if e.fileIdx == m.cursor {
+		// Re-render with cursor highlighting (bold the name portion).
+		highlighted := indent + styleActive.Render(prefix+name) + padding + coloredDelta
+		if !m.sidebarFocused {
+			highlighted = indent + styleBold.Render(prefix+name) + padding + coloredDelta
+		}
+		return highlighted
+	}
+
+	return line
+}
+
 func (m model) renderStatus() string {
 	if m.err != nil {
-		return styleFaint.Render("error: " + m.err.Error())
+		return styleFaint.Render(" error: " + m.err.Error())
 	}
 
 	var parts []string
 	if len(m.files) > 0 {
+		// Total delta summary.
+		totalAdd, totalRem := 0, 0
+		for _, f := range m.files {
+			totalAdd += f.Added
+			totalRem += f.Removed
+		}
+		parts = append(parts, fmt.Sprintf("%d files", len(m.files)))
+		parts = append(parts, styleAdd.Render(fmt.Sprintf("+%d", totalAdd))+" "+styleRem.Render(fmt.Sprintf("-%d", totalRem)))
+
 		parts = append(parts, fmt.Sprintf("%d/%d", m.cursor+1, len(m.files)))
 		if !m.sidebarFocused {
 			parts = append(parts, fmt.Sprintf("%.0f%%", m.viewport.ScrollPercent()*100))
@@ -356,17 +474,59 @@ func (m model) renderStatus() string {
 	if m.sidebarFocused {
 		parts = append(parts, "enter/l: open  tab: switch  q: quit")
 	} else {
-		parts = append(parts, "h/tab: files  j/k: scroll  ^d/^u: half page  q: quit")
+		parts = append(parts, "h/tab: files  j/k ↑↓  ^d/^u  q: quit")
 	}
 
-	return styleFaint.Render(strings.Join(parts, "  ·  "))
+	return styleFaint.Render(" " + strings.Join(parts, "  ·  "))
 }
 
-func trimPath(path string, maxLen int) string {
-	if len(path) <= maxLen {
-		return path
+// --- Tree building ---
+
+// buildTree converts a sorted list of file diffs into an indented tree of entries.
+func buildTree(files []FileDiff) []treeEntry {
+	var entries []treeEntry
+	var prevParts []string
+
+	for i, f := range files {
+		parts := strings.Split(f.Path, "/")
+		dirParts := parts[:len(parts)-1]
+		fileName := parts[len(parts)-1]
+
+		// Find how much of the directory path is shared with the previous file.
+		common := 0
+		for common < len(prevParts) && common < len(dirParts) && prevParts[common] == dirParts[common] {
+			common++
+		}
+
+		// Emit new directory headers for any divergence.
+		for d := common; d < len(dirParts); d++ {
+			entries = append(entries, treeEntry{
+				name:    dirParts[d] + "/",
+				fileIdx: -1,
+				depth:   d,
+			})
+		}
+
+		entries = append(entries, treeEntry{
+			name:    fileName,
+			fileIdx: i,
+			depth:   len(dirParts),
+		})
+
+		prevParts = dirParts
 	}
-	return "…" + path[len(path)-maxLen+1:]
+
+	return entries
+}
+
+// cursorTreeRow returns the tree entry index that corresponds to the current cursor.
+func (m model) cursorTreeRow() int {
+	for i, e := range m.tree {
+		if e.fileIdx == m.cursor {
+			return i
+		}
+	}
+	return 0
 }
 
 func max(a, b int) int {
