@@ -47,10 +47,10 @@ Mouse: click to select files, scroll wheel to navigate or scroll.
 ## TODO
 
 - [x] Line numbers
-- [ ] Git history
+- [x] Git history
 - [ ] CLI flags
 - [x] Thicker sidebars
-- [ ] Collapsible sidebar
+- [x] Resizable sidebar
 - [x] Scrollbar
 - [x] Continuous scroll
 - [x] Refactor everything
