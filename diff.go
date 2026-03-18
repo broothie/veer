@@ -264,7 +264,9 @@ func parseUnifiedDiff(rawLines []string) ([]DiffLine, int, int, error) {
 			}
 			firstHunk = false
 			var os, oc, ns, nc int
-			fmt.Sscanf(raw, "@@ -%d,%d +%d,%d @@", &os, &oc, &ns, &nc)
+			if _, err := fmt.Sscanf(raw, "@@ -%d,%d +%d,%d @@", &os, &oc, &ns, &nc); err != nil {
+				continue
+			}
 			oldNum = os
 			newNum = ns
 
