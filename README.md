@@ -68,6 +68,10 @@ veer -d                 # enable debug logging to ~/.veer/debug.log
 - [ ] Dynamic sidebar width based on window size
 - [ ] Resizable git history pane
 - [x] Flag to disable syntax highlighting
+- [ ] Fix version flag output (`veer -v` currently prints `dev`)
+- [ ] Fix header truncation
+- [ ] Fix line wrapping
+- [ ] Fix pane borders
 - [ ] Add linux to goreleaser
 - [ ] Ensure README matches implementation
 - [ ] Flesh out tests
