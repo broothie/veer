@@ -58,8 +58,8 @@ veer -w 40              # initial sidebar width of 40 (default 35)
 - [x] Continuous scroll
 - [x] Refactor everything
 - [ ] Expandable ellipsis
-- [ ] Rethink keybinds
+- [x] Rethink keybinds
 - [ ] Hunk/file/line staging and committing
 - [ ] Display empty commits
 - [x] Set up goreleaser
-- [ ] Syntax highlighting
+- [x] Syntax highlighting

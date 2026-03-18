@@ -164,8 +164,11 @@ func (m *model) buildDiffContent() string {
 		}
 		numWidth := max(3, len(fmt.Sprint(maxNum)))
 
-		for _, dl := range f.Lines {
-			sb.WriteString(renderDiffLine(dl, numWidth))
+		// Batch-highlight all lines for this file.
+		highlighted := highlightFile(f.Path, f.Lines)
+
+		for j, dl := range f.Lines {
+			sb.WriteString(renderDiffLine(dl, numWidth, highlighted[j]))
 			sb.WriteByte('\n')
 			lineNum++
 		}
@@ -174,16 +177,16 @@ func (m *model) buildDiffContent() string {
 	return sb.String()
 }
 
-func renderDiffLine(dl DiffLine, numWidth int) string {
+func renderDiffLine(dl DiffLine, numWidth int, hl highlightedLine) string {
 	switch dl.Type {
 	case LineSeparator:
 		return styleGutter.Render(fmt.Sprintf(" %*s   ", numWidth, "…"))
 	case LineContext:
-		return styleGutter.Render(fmt.Sprintf(" %*d   ", numWidth, dl.NewNum)) + dl.Content
+		return styleGutter.Render(fmt.Sprintf(" %*d   ", numWidth, dl.NewNum)) + renderHighlighted(hl, dl.Content)
 	case LineAdded:
-		return styleGutter.Render(fmt.Sprintf(" %*d + ", numWidth, dl.NewNum)) + styleAddLine.Render(dl.Content)
+		return styleGutter.Render(fmt.Sprintf(" %*d + ", numWidth, dl.NewNum)) + renderHighlightedWithBG(hl, dl.Content, lipgloss.Color("22"))
 	case LineRemoved:
-		return styleGutter.Render(fmt.Sprintf(" %*d - ", numWidth, dl.OldNum)) + styleRemLine.Render(dl.Content)
+		return styleGutter.Render(fmt.Sprintf(" %*d - ", numWidth, dl.OldNum)) + renderHighlightedWithBG(hl, dl.Content, lipgloss.Color("52"))
 	case LineHeader:
 		pad := strings.Repeat("─", numWidth+3)
 		return styleHeader.Render(fmt.Sprintf(" %s %s ", pad, dl.Content))
