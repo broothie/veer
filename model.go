@@ -100,10 +100,10 @@ type model struct {
 
 	// File watcher state.
 	watcherCh     <-chan struct{} // receives file change notifications
-	watcherClose  func()         // cleanup watcher resources
-	watcherReady  bool           // true once watcher is started
-	pendingChange bool           // change detected while a fetch was in progress
-	lastFetchAt   time.Time      // when the last fetch completed
+	watcherClose  func()          // cleanup watcher resources
+	watcherReady  bool            // true once watcher is started
+	pendingChange bool            // change detected while a fetch was in progress
+	lastFetchAt   time.Time       // when the last fetch completed
 }
 
 func newModel(cfg config) model {
@@ -125,14 +125,18 @@ func newModel(cfg config) model {
 	ti.CharLimit = 500
 	ti.SetHeight(3)
 	ti.ShowLineNumbers = false
-	return model{
+	m := model{
 		cfg:            cfg,
 		focus:          focusFiles,
 		cwd:            cwd,
+		width:          80,
+		height:         24,
 		sidebarWidth:   sw,
 		selectedCommit: -1,
 		commitMsg:      ti,
 	}
+	m.viewport = viewport.New(m.vpWidth(), m.mainHeight())
+	return m
 }
 
 func (m model) Init() tea.Cmd {
@@ -540,6 +544,9 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "q", "ctrl+c":
+		if m.watcherClose != nil {
+			m.watcherClose()
+		}
 		return m, tea.Quit
 	case "tab":
 		m.cycleTab(1)
@@ -961,5 +968,5 @@ func (m model) View() string {
 	main := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, sidebarScrollbar, border, content, diffScrollbar)
 	status := m.renderStatus()
 
-	return lipgloss.JoinVertical(lipgloss.Left, header, main, status)
+	return header + "\n" + main + "\n" + status
 }

@@ -10,7 +10,7 @@ import (
 var (
 	styleScrollThumb = lipgloss.NewStyle().Background(lipgloss.Color("244"))
 	styleScrollTrack = lipgloss.NewStyle().Background(lipgloss.Color("237"))
-	styleBar         = lipgloss.NewStyle().Background(lipgloss.Color("237"))
+	styleBar         = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("237"))
 )
 
 const (
@@ -72,7 +72,11 @@ func (m model) renderHeader() string {
 
 	var parts []string
 	if m.cwd != "" {
-		parts = append(parts, m.cwd)
+		maxCWD := max(16, m.width/3)
+		parts = append(parts, truncateLeft(m.cwd, maxCWD))
+	}
+	if m.branch != "" {
+		parts = append(parts, styleBranch.Inherit(styleBar).Render(m.branch))
 	}
 	if m.sha != "" {
 		parts = append(parts, styleSHA.Inherit(styleBar).Render(m.sha))
@@ -97,15 +101,38 @@ func (m model) renderHeader() string {
 		sepStr := sep
 		avail := m.width - lipgloss.Width(line) - lipgloss.Width(sepStr) - 1 // 1 for leading space
 		if avail > 3 {
-			msg := m.message
-			if len(msg) > avail {
-				msg = msg[:avail-1] + "…"
-			}
+			msg := truncateRight(m.message, avail)
 			line += styleBar.Render(sepStr + msg)
 		}
 	}
 
 	return styleBar.Width(m.width).Render(" " + line)
+}
+
+func truncateLeft(s string, maxWidth int) string {
+	if maxWidth <= 0 || lipgloss.Width(s) <= maxWidth {
+		return s
+	}
+	if maxWidth == 1 {
+		return "…"
+	}
+	if maxWidth >= len(s) {
+		return s
+	}
+	return "…" + s[len(s)-maxWidth+1:]
+}
+
+func truncateRight(s string, maxWidth int) string {
+	if maxWidth <= 0 || lipgloss.Width(s) <= maxWidth {
+		return s
+	}
+	if maxWidth == 1 {
+		return "…"
+	}
+	if maxWidth >= len(s) {
+		return s
+	}
+	return s[:maxWidth-1] + "…"
 }
 
 func (m *model) buildDiffContent() string {

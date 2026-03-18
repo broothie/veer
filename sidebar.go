@@ -18,6 +18,7 @@ type treeEntry struct {
 
 func (m model) renderSidebar(height int) string {
 	fileH, msgH, _ := m.sidebarSplit()
+	commitH := height - fileH - msgH
 
 	// File tree section.
 	fileSection := m.renderFileTree(fileH)
@@ -41,7 +42,6 @@ func (m model) renderSidebar(height int) string {
 	}
 
 	// Commit list section.
-	commitH := height - fileH - msgH
 	commitSection := m.renderCommitList(commitH)
 	commitLines := strings.Split(commitSection, "\n")
 	lines = append(lines, commitLines...)

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,19 +46,17 @@ func startWatcher(repoRoot string, debounce time.Duration, extraSkipDirs []strin
 	ch := make(chan struct{}, 1)
 	done := make(chan struct{})
 
-	allSkipDirs := make(map[string]bool, len(skipDirs)+len(extraSkipDirs))
-	for k, v := range skipDirs {
-		allSkipDirs[k] = v
-	}
-	for _, d := range extraSkipDirs {
-		allSkipDirs[d] = true
+	allSkipDirs := makeSkipDirSet(extraSkipDirs)
+	gitDir, err := resolveGitDir(repoRoot)
+	if err != nil {
+		debugf("watcher: failed to resolve git dir: %v", err)
 	}
 
-	watchGitDir(w, repoRoot)
+	watchGitDir(w, gitDir)
 	count := watchWorktree(w, repoRoot, allSkipDirs)
 	debugf("watcher: watching %d directories under %s", count, repoRoot)
 
-	go debounceLoop(w, ch, done, repoRoot, debounce)
+	go debounceLoop(w, ch, done, repoRoot, gitDir, debounce, allSkipDirs)
 
 	cleanup := func() {
 		close(done)
@@ -67,7 +67,7 @@ func startWatcher(repoRoot string, debounce time.Duration, extraSkipDirs []strin
 }
 
 // debounceLoop reads fsnotify events and coalesces them into single notifications.
-func debounceLoop(w *fsnotify.Watcher, ch chan<- struct{}, done <-chan struct{}, repoRoot string, debounce time.Duration) {
+func debounceLoop(w *fsnotify.Watcher, ch chan<- struct{}, done <-chan struct{}, repoRoot, gitDir string, debounce time.Duration, skip map[string]bool) {
 	var timer *time.Timer
 	for {
 		select {
@@ -80,7 +80,10 @@ func debounceLoop(w *fsnotify.Watcher, ch chan<- struct{}, done <-chan struct{},
 			if !ok {
 				return
 			}
-			if !isRelevantEvent(ev, repoRoot) {
+			if ev.Has(fsnotify.Create) {
+				watchNewPaths(w, ev.Name, skip)
+			}
+			if !isRelevantEvent(ev, repoRoot, gitDir) {
 				continue
 			}
 			if timer != nil {
@@ -101,17 +104,56 @@ func debounceLoop(w *fsnotify.Watcher, ch chan<- struct{}, done <-chan struct{},
 	}
 }
 
-// watchGitDir watches key paths in .git for staging and commit changes.
-func watchGitDir(w *fsnotify.Watcher, repoRoot string) {
-	gitDir := filepath.Join(repoRoot, ".git")
+func makeSkipDirSet(extraSkipDirs []string) map[string]bool {
+	allSkipDirs := make(map[string]bool, len(skipDirs)+len(extraSkipDirs))
+	for k, v := range skipDirs {
+		allSkipDirs[k] = v
+	}
+	for _, d := range extraSkipDirs {
+		allSkipDirs[d] = true
+	}
+	return allSkipDirs
+}
+
+func resolveGitDir(repoRoot string) (string, error) {
+	gitPath := filepath.Join(repoRoot, ".git")
+	info, err := os.Lstat(gitPath)
+	if err != nil {
+		return "", err
+	}
+	if info.IsDir() {
+		return gitPath, nil
+	}
+
+	data, err := os.ReadFile(gitPath)
+	if err != nil {
+		return "", err
+	}
+	line := strings.TrimSpace(string(data))
+	const prefix = "gitdir: "
+	if !strings.HasPrefix(line, prefix) {
+		return "", errors.New("unsupported .git file format")
+	}
+	resolved := strings.TrimSpace(line[len(prefix):])
+	if !filepath.IsAbs(resolved) {
+		resolved = filepath.Join(repoRoot, resolved)
+	}
+	return filepath.Clean(resolved), nil
+}
+
+// watchGitDir watches key paths in the git dir for staging and commit changes.
+func watchGitDir(w *fsnotify.Watcher, gitDir string) {
+	if gitDir == "" {
+		return
+	}
+
 	info, err := os.Lstat(gitDir)
 	if err != nil {
-		debugf("watcher: cannot stat .git: %v", err)
+		debugf("watcher: cannot stat git dir %s: %v", gitDir, err)
 		return
 	}
 	if !info.IsDir() {
-		// .git is a file in worktrees; skip for now.
-		debugf("watcher: .git is a file (worktree), skipping .git watches")
+		debugf("watcher: git dir is not a directory: %s", gitDir)
 		return
 	}
 
@@ -131,31 +173,50 @@ func watchGitDir(w *fsnotify.Watcher, repoRoot string) {
 // watchWorktree walks the worktree and watches directories, skipping known-large ones.
 func watchWorktree(w *fsnotify.Watcher, root string, skip map[string]bool) int {
 	count := 0
-	filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil || !d.IsDir() {
+	_ = addWatchPath(w, root, skip, &count)
+	return count
+}
+
+func watchNewPaths(w *fsnotify.Watcher, path string, skip map[string]bool) {
+	count := 0
+	if err := addWatchPath(w, path, skip, &count); err != nil {
+		debugf("watcher: failed to watch new path %s: %v", path, err)
+	}
+}
+
+func addWatchPath(w *fsnotify.Watcher, path string, skip map[string]bool, count *int) error {
+	return filepath.WalkDir(path, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
 			return nil
 		}
-		if count >= maxWatches {
-			return filepath.SkipAll
+		if !d.IsDir() {
+			return nil
 		}
 		if skip[d.Name()] {
 			return filepath.SkipDir
 		}
-		if err := w.Add(path); err == nil {
-			count++
+		if count != nil && *count >= maxWatches {
+			return filepath.SkipAll
+		}
+		if err := w.Add(path); err == nil && count != nil {
+			*count = *count + 1
 		}
 		return nil
 	})
-	return count
 }
 
 // isRelevantEvent filters out noisy/irrelevant fsnotify events.
-func isRelevantEvent(ev fsnotify.Event, repoRoot string) bool {
-	gitDir := filepath.Join(repoRoot, ".git")
-	if strings.HasPrefix(ev.Name, gitDir+string(filepath.Separator)) {
+func isRelevantEvent(ev fsnotify.Event, repoRoot, gitDir string) bool {
+	if gitDir != "" && (ev.Name == gitDir || strings.HasPrefix(ev.Name, gitDir+string(filepath.Separator))) {
 		rel, _ := filepath.Rel(gitDir, ev.Name)
 		return rel == "index" || rel == "HEAD" ||
 			strings.HasPrefix(rel, "refs"+string(filepath.Separator))
+	}
+	if ev.Name == filepath.Join(repoRoot, ".git") {
+		return true
 	}
 	return true
 }

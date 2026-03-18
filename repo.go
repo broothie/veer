@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -23,6 +24,7 @@ var (
 	cachedRepoMu sync.Mutex
 	cachedRepo   *git.Repository
 	cachedWT     *git.Worktree
+	cachedWD     string
 )
 
 // gitRepo implements Repo using go-git.
@@ -40,7 +42,12 @@ func openRepo() (*gitRepo, error) {
 	cachedRepoMu.Lock()
 	defer cachedRepoMu.Unlock()
 
-	if cachedRepo == nil {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+
+	if cachedRepo == nil || cachedWT == nil || cachedWD != cwd {
 		debugf("openRepo: opening repository (first time)")
 		repo, err := git.PlainOpenWithOptions(".", &git.PlainOpenOptions{
 			DetectDotGit:          true,
@@ -67,6 +74,7 @@ func openRepo() (*gitRepo, error) {
 
 		cachedRepo = repo
 		cachedWT = wt
+		cachedWD = cwd
 	} else {
 		debugf("openRepo: reusing cached repository")
 	}

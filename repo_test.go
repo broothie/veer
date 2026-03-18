@@ -151,6 +151,39 @@ func TestGitRepoStatus_IgnoresGitignored(t *testing.T) {
 	}
 }
 
+func TestOpenRepo_ReopensWhenWorkingDirectoryChanges(t *testing.T) {
+	dir1 := initTestRepo(t)
+	dir2 := initTestRepo(t)
+
+	repo1, err := openRepoAt(dir1)
+	if err != nil {
+		t.Fatalf("openRepoAt(dir1): %v", err)
+	}
+	repo2, err := openRepoAt(dir2)
+	if err != nil {
+		t.Fatalf("openRepoAt(dir2): %v", err)
+	}
+
+	assertSamePath(t, repo1.wt.Filesystem.Root(), dir1)
+	assertSamePath(t, repo2.wt.Filesystem.Root(), dir2)
+}
+
+func assertSamePath(t *testing.T, got, want string) {
+	t.Helper()
+
+	gotEval, err := filepath.EvalSymlinks(got)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q): %v", got, err)
+	}
+	wantEval, err := filepath.EvalSymlinks(want)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q): %v", want, err)
+	}
+	if gotEval != wantEval {
+		t.Fatalf("path = %q, want %q", gotEval, wantEval)
+	}
+}
+
 // openRepoAt opens a gitRepo rooted at dir, for testing.
 func openRepoAt(dir string) (*gitRepo, error) {
 	orig, err := os.Getwd()
