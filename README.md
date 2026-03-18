@@ -51,6 +51,6 @@ Mouse: click to select files, scroll wheel to navigate or scroll.
 - [ ] CLI flags
 - [x] Thicker sidebars
 - [ ] Collapsible sidebar
-- [ ] Scrollbar
+- [x] Scrollbar
 - [ ] Continuous scroll
-- [ ] Refactor everything
+- [x] Refactor everything

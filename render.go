@@ -7,6 +7,41 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+var (
+	styleScrollThumb = lipgloss.NewStyle().Background(lipgloss.Color("244"))
+	styleScrollTrack = lipgloss.NewStyle().Background(lipgloss.Color("236"))
+)
+
+const (
+	scrollThumbChar = "┃"
+	scrollTrackChar = "│"
+)
+
+// renderScrollbar renders a vertical scrollbar column of the given height.
+// Returns empty string if all content is visible.
+func renderScrollbar(height, total, offset int) string {
+	if total <= height {
+		return ""
+	}
+
+	thumbSize := max(1, height*height/total)
+	maxOffset := total - height
+	thumbPos := offset * (height - thumbSize) / maxOffset
+
+	var sb strings.Builder
+	for i := range height {
+		if i > 0 {
+			sb.WriteByte('\n')
+		}
+		if i >= thumbPos && i < thumbPos+thumbSize {
+			sb.WriteString(styleScrollThumb.Render(scrollThumbChar))
+		} else {
+			sb.WriteString(styleScrollTrack.Render(scrollTrackChar))
+		}
+	}
+	return sb.String()
+}
+
 func (m model) renderHeader() string {
 	sep := styleFaint.Render(" · ")
 
@@ -44,7 +79,7 @@ func (m model) renderHeader() string {
 
 func (m model) buildDiffContent() string {
 	if len(m.files) == 0 {
-		vpWidth := max(1, m.width-sidebarWidth-sidebarPad-1)
+		vpWidth := max(1, m.width-sidebarWidth-sidebarPad-1-1) // -1 for scrollbar
 		vpHeight := m.mainHeight()
 		return lipgloss.NewStyle().
 			Width(vpWidth).
@@ -108,9 +143,6 @@ func (m model) renderStatus() string {
 		parts = append(parts, fmt.Sprintf("%d files", len(m.files)))
 		parts = append(parts, styleAdd.Render(fmt.Sprintf("+%d", totalAdd))+" "+styleRem.Render(fmt.Sprintf("-%d", totalRem)))
 		parts = append(parts, fmt.Sprintf("%d/%d", m.cursor+1, len(m.files)))
-		if !m.sidebarFocused {
-			parts = append(parts, fmt.Sprintf("%.0f%%", m.viewport.ScrollPercent()*100))
-		}
 	}
 
 	if m.sidebarFocused {

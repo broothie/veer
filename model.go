@@ -102,7 +102,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		vpWidth := max(1, m.width-sidebarWidth-sidebarPad-1)
+		vpWidth := max(1, m.width-sidebarWidth-sidebarPad-1-1) // -1 for scrollbar
 		vpHeight := m.mainHeight()
 		m.viewport = viewport.New(vpWidth, vpHeight)
 		m.rebuildDiffContent()
@@ -317,7 +317,23 @@ func (m model) View() string {
 	sidebar := m.renderSidebar(mainH)
 	content := m.viewport.View()
 
-	main := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, content)
+	// Diff scrollbar: total lines in content vs viewport height.
+	totalDiffLines := m.viewport.TotalLineCount()
+	diffScrollbar := renderScrollbar(mainH, totalDiffLines, m.viewport.YOffset)
+
+	// Sidebar scrollbar (rendered inside renderSidebar via the border area isn't
+	// feasible, so we handle it separately if needed).
+	sidebarScrollbar := renderScrollbar(mainH, len(m.tree), m.sidebarOffset)
+
+	parts := []string{sidebar}
+	if sidebarScrollbar != "" {
+		parts = append(parts, sidebarScrollbar)
+	}
+	parts = append(parts, content)
+	if diffScrollbar != "" {
+		parts = append(parts, diffScrollbar)
+	}
+	main := lipgloss.JoinHorizontal(lipgloss.Top, parts...)
 	status := m.renderStatus()
 
 	return lipgloss.JoinVertical(lipgloss.Left, header, main, status)

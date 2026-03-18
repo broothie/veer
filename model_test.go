@@ -479,6 +479,38 @@ func TestView_EmptyWhenNoWidth(t *testing.T) {
 	}
 }
 
+// --- renderScrollbar ---
+
+func TestRenderScrollbar_NoScrollNeeded(t *testing.T) {
+	result := renderScrollbar(20, 10, 0)
+	if result != "" {
+		t.Error("should return empty when content fits")
+	}
+}
+
+func TestRenderScrollbar_ExactFit(t *testing.T) {
+	result := renderScrollbar(20, 20, 0)
+	if result != "" {
+		t.Error("should return empty when content exactly fits")
+	}
+}
+
+func TestRenderScrollbar_HasCorrectHeight(t *testing.T) {
+	result := renderScrollbar(10, 50, 0)
+	lines := strings.Split(result, "\n")
+	if len(lines) != 10 {
+		t.Errorf("scrollbar height = %d, want 10", len(lines))
+	}
+}
+
+func TestRenderScrollbar_ThumbMovesWithOffset(t *testing.T) {
+	top := renderScrollbar(20, 100, 0)
+	bottom := renderScrollbar(20, 100, 80)
+	if top == bottom {
+		t.Error("scrollbar should look different at top vs bottom")
+	}
+}
+
 // --- rebuildDiffContent ---
 
 func TestRebuildDiffContent_SkipsWhenCached(t *testing.T) {
