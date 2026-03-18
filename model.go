@@ -41,6 +41,7 @@ type model struct {
 	gitArgs        []string
 	files          []FileDiff
 	cursor         int
+	sidebarOffset  int
 	viewport       viewport.Model
 	sidebarFocused bool
 	width          int
@@ -114,6 +115,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
+
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
 	}
 
 	return m, nil
@@ -205,6 +209,52 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	inSidebar := msg.X <= sidebarWidth
+
+	switch msg.Button {
+	case tea.MouseButtonLeft:
+		if msg.Action != tea.MouseActionPress {
+			break
+		}
+		if inSidebar {
+			// Click on a file in the sidebar.
+			idx := m.sidebarOffset + msg.Y
+			if idx >= 0 && idx < len(m.files) {
+				m.cursor = idx
+				m.sidebarFocused = false
+				m.viewport.SetContent(m.buildDiffContent())
+				m.viewport.GotoTop()
+			}
+		} else {
+			// Click in the diff panel focuses it.
+			m.sidebarFocused = false
+		}
+
+	case tea.MouseButtonWheelUp:
+		if inSidebar {
+			if m.cursor > 0 {
+				m.cursor--
+				m.viewport.SetContent(m.buildDiffContent())
+			}
+		} else {
+			m.viewport.LineUp(3)
+		}
+
+	case tea.MouseButtonWheelDown:
+		if inSidebar {
+			if m.cursor < len(m.files)-1 {
+				m.cursor++
+				m.viewport.SetContent(m.buildDiffContent())
+			}
+		} else {
+			m.viewport.LineDown(3)
+		}
+	}
+
+	return m, nil
+}
+
 func (m model) buildDiffContent() string {
 	if m.cursor >= len(m.files) {
 		return ""
@@ -238,6 +288,14 @@ func (m model) View() string {
 	}
 
 	mainHeight := m.height - 1
+
+	// Keep cursor visible in sidebar scroll region.
+	if m.cursor < m.sidebarOffset {
+		m.sidebarOffset = m.cursor
+	} else if m.cursor >= m.sidebarOffset+mainHeight {
+		m.sidebarOffset = m.cursor - mainHeight + 1
+	}
+
 	sidebar := m.renderSidebar(mainHeight)
 	content := m.viewport.View()
 
@@ -258,10 +316,7 @@ func (m model) renderSidebar(height int) string {
 		lines = append(lines, styleFaint.Render(msg))
 	} else {
 		// Scroll the list to keep the cursor visible.
-		start := 0
-		if m.cursor >= height {
-			start = m.cursor - height + 1
-		}
+		start := m.sidebarOffset
 		end := min(start+height, len(m.files))
 
 		for i := start; i < end; i++ {
