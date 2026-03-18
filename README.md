@@ -63,3 +63,4 @@ Mouse: click to select files, scroll wheel to navigate or scroll.
 - [ ] Expandable ellipsis
 - [ ] Rethink keybinds
 - [ ] Hunk/file/line staging and committing
+- [ ] Display empty commits
