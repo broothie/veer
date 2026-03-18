@@ -62,3 +62,4 @@ veer -w 40              # initial sidebar width of 40 (default 35)
 - [ ] Hunk/file/line staging and committing
 - [ ] Display empty commits
 - [x] Set up goreleaser
+- [ ] Syntax highlighting

@@ -22,8 +22,8 @@ func (m model) renderSidebar(height int) string {
 	// File tree section.
 	fileSection := m.renderFileTree(fileH)
 
-	// Separator line.
-	sep := styleFaint.Render(strings.Repeat("─", m.sidebarWidth))
+	// Separator bar.
+	sep := styleBar.Width(m.sidebarWidth).Render("")
 
 	// Commit list section.
 	commitH := height - fileH - 1 // -1 for separator
@@ -190,34 +190,36 @@ func (m model) renderTreeEntry(e treeEntry) string {
 	delta := addStr + " " + remStr + " " + status
 	coloredDelta := styleAdd.Render(addStr) + " " + styleRem.Render(remStr) + " " + coloredStatus
 
-	prefix := "  "
+	var marker string
 	if e.fileIdx == m.cursor {
-		prefix = "> "
+		marker = styleActive.Render("● ")
+	} else {
+		marker = styleFaint.Render("○ ")
 	}
+	markerWidth := lipgloss.Width("● ")
 
 	// Use lipgloss.Width for accurate width calculation.
-	usedWidth := lipgloss.Width(indent) + lipgloss.Width(prefix) + lipgloss.Width(delta)
+	usedWidth := lipgloss.Width(indent) + markerWidth + lipgloss.Width(delta)
 	nameMaxLen := m.sidebarWidth - usedWidth - 1 // 1 for gap
 	name := e.name
 	if len(name) > nameMaxLen && nameMaxLen > 3 {
 		name = name[:nameMaxLen-1] + "…"
 	}
 
-	gap := m.sidebarWidth - lipgloss.Width(indent) - lipgloss.Width(prefix) - lipgloss.Width(name) - lipgloss.Width(delta)
+	gap := m.sidebarWidth - lipgloss.Width(indent) - markerWidth - lipgloss.Width(name) - lipgloss.Width(delta)
 	if gap < 1 {
 		gap = 1
 	}
 	padding := strings.Repeat(" ", gap)
 
 	if e.fileIdx == m.cursor {
-		nameStr := prefix + name
 		if m.focus == focusFiles {
-			return indent + styleActive.Render(nameStr) + padding + coloredDelta
+			return indent + marker + styleActive.Render(name) + padding + coloredDelta
 		}
-		return indent + styleBold.Render(nameStr) + padding + coloredDelta
+		return indent + marker + styleBold.Render(name) + padding + coloredDelta
 	}
 
-	return indent + prefix + name + padding + coloredDelta
+	return indent + marker + name + padding + coloredDelta
 }
 
 // buildTree converts a sorted list of file diffs into an indented tree of entries.

@@ -324,7 +324,7 @@ func TestRenderHeader_TruncatesLongMessage(t *testing.T) {
 	m.message = "this is a very long commit message that should be truncated"
 
 	header := m.renderHeader()
-	if lipgloss.Width(header) > m.width+1 { // +1 for trailing newline
+	if lipgloss.Width(header) > m.width {
 		t.Errorf("header width %d exceeds terminal width %d", lipgloss.Width(header), m.width)
 	}
 }
@@ -510,8 +510,8 @@ func TestRenderTreeEntry_SelectedFile(t *testing.T) {
 
 	entry := treeEntry{name: "a.go", fileIdx: 0, depth: 0}
 	result := m.renderTreeEntry(entry)
-	if !strings.Contains(result, ">") {
-		t.Error("selected file should have > prefix")
+	if !strings.Contains(result, "●") {
+		t.Error("selected file should have ● marker")
 	}
 	if !strings.Contains(result, "a.go") {
 		t.Error("selected file should contain filename")
@@ -524,8 +524,8 @@ func TestRenderTreeEntry_UnselectedFile(t *testing.T) {
 
 	entry := treeEntry{name: "b.go", fileIdx: 1, depth: 0}
 	result := m.renderTreeEntry(entry)
-	if strings.Contains(result, ">") {
-		t.Error("unselected file should not have > prefix")
+	if !strings.Contains(result, "○") {
+		t.Error("unselected file should have ○ marker")
 	}
 }
 
@@ -543,15 +543,17 @@ func TestView_EmptyWhenNoWidth(t *testing.T) {
 
 func TestRenderScrollbar_NoScrollNeeded(t *testing.T) {
 	result := renderScrollbar(20, 10, 0)
-	if result != "" {
-		t.Error("should return empty when content fits")
+	lines := strings.Split(result, "\n")
+	if len(lines) != 20 {
+		t.Errorf("should return %d-line track column when content fits, got %d", 20, len(lines))
 	}
 }
 
 func TestRenderScrollbar_ExactFit(t *testing.T) {
 	result := renderScrollbar(20, 20, 0)
-	if result != "" {
-		t.Error("should return empty when content exactly fits")
+	lines := strings.Split(result, "\n")
+	if len(lines) != 20 {
+		t.Errorf("should return %d-line track column when content exactly fits, got %d", 20, len(lines))
 	}
 }
 

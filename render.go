@@ -10,18 +10,26 @@ import (
 var (
 	styleScrollThumb = lipgloss.NewStyle().Background(lipgloss.Color("244"))
 	styleScrollTrack = lipgloss.NewStyle().Background(lipgloss.Color("236"))
+	styleBar         = lipgloss.NewStyle().Background(lipgloss.Color("237"))
 )
 
 const (
-	scrollThumbChar = "┃"
-	scrollTrackChar = "│"
+	scrollThumbChar = "█"
+	scrollTrackChar = " "
 )
 
 // renderScrollbar renders a vertical scrollbar column of the given height.
-// Returns empty string if all content is visible.
+// Always returns a column; renders a plain track when all content is visible.
 func renderScrollbar(height, total, offset int) string {
 	if total <= height {
-		return ""
+		var sb strings.Builder
+		for i := range height {
+			if i > 0 {
+				sb.WriteByte('\n')
+			}
+			sb.WriteString(styleScrollTrack.Render(scrollTrackChar))
+		}
+		return sb.String()
 	}
 
 	thumbSize := max(1, height*height/total)
@@ -43,11 +51,11 @@ func renderScrollbar(height, total, offset int) string {
 }
 
 func (m model) renderHeader() string {
-	sep := styleFaint.Render(" · ")
+	sep := " · "
 
 	var parts []string
 	if m.cwd != "" {
-		parts = append(parts, styleFaint.Render(m.cwd))
+		parts = append(parts, m.cwd)
 	}
 	if m.sha != "" {
 		parts = append(parts, styleSHA.Render(m.sha))
@@ -56,22 +64,23 @@ func (m model) renderHeader() string {
 	line := strings.Join(parts, sep)
 
 	// Append commit message, truncating if needed.
+	// Render with explicit bar background to prevent SHA style reset from clearing it.
 	if m.message != "" {
-		prefix := line
+		sepStr := ""
 		if len(parts) > 0 {
-			prefix += sep
+			sepStr = sep
 		}
-		avail := m.width - lipgloss.Width(prefix) - 1 // 1 for leading space
+		avail := m.width - lipgloss.Width(line) - lipgloss.Width(sepStr) - 1 // 1 for leading space
 		if avail > 3 {
 			msg := m.message
 			if len(msg) > avail {
 				msg = msg[:avail-1] + "…"
 			}
-			line = prefix + msg
+			line += styleBar.Render(sepStr + msg)
 		}
 	}
 
-	return " " + line + "\n"
+	return styleBar.Width(m.width).Render(" " + line)
 }
 
 func (m *model) buildDiffContent() string {
@@ -160,7 +169,7 @@ func renderDiffLine(dl DiffLine, numWidth int) string {
 
 func (m model) renderStatus() string {
 	if m.err != nil {
-		return styleFaint.Render(" error: " + m.err.Error())
+		return styleBar.Width(m.width).Render(" error: " + m.err.Error())
 	}
 
 	var parts []string
@@ -184,5 +193,5 @@ func (m model) renderStatus() string {
 		parts = append(parts, "tab: files  j/k ↑↓  ^f/^b: page  q: quit")
 	}
 
-	return "\n" + styleFaint.Render(" "+strings.Join(parts, "  ·  "))
+	return styleBar.Width(m.width).Render(" " + strings.Join(parts, "  ·  "))
 }
