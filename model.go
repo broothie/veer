@@ -57,6 +57,7 @@ type (
 	diffResultMsg struct {
 		result   *DiffResult
 		commits  []CommitInfo
+		headSHA  string // SHA used to determine whether commits were refreshed
 		repoRoot string
 		err      error
 	}
@@ -88,6 +89,7 @@ type model struct {
 	fetching       bool
 	diffGen        uint64    // incremented when files change
 	lastBuiltGen   uint64    // gen when diff content was last built
+	lastLogSHA     string    // HEAD SHA at last commit-log fetch; skip Log() when unchanged
 	fileOffsets    []int     // line offset where each file starts in the viewport
 	hunkRefs       []hunkRef // maps viewport lines to file+hunk indices
 	commits        []CommitInfo
@@ -127,27 +129,38 @@ func newModel(cfg config) model {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(fetchCmd(m.cfg), tickCmd(m.cfg.Interval))
+	return tea.Batch(fetchCmd(m.cfg, m.lastLogSHA), tickCmd(m.cfg.Interval))
 }
 
 func tickCmd(interval time.Duration) tea.Cmd {
 	return tea.Tick(interval, func(time.Time) tea.Msg { return tickMsg{} })
 }
 
-func fetchCmd(cfg config) tea.Cmd {
+func fetchCmd(cfg config, lastLogSHA string) tea.Cmd {
 	return func() tea.Msg {
 		repo, err := openRepo()
 		if err != nil {
 			return diffResultMsg{err: err}
 		}
 		result, err := fetchDiff(repo, cfg)
-		commits, logErr := repo.Log(50)
-		if logErr != nil {
-			debugf("fetchCmd: Log failed: %v", logErr)
+
+		// Only re-fetch the commit log when HEAD has moved (new commit, reset, etc.).
+		head, headErr := repo.Head()
+		var commits []CommitInfo
+		if headErr != nil {
+			debugf("fetchCmd: Head failed: %v", headErr)
+		} else if head.SHA != lastLogSHA {
+			var logErr error
+			commits, logErr = repo.Log(50)
+			if logErr != nil {
+				debugf("fetchCmd: Log failed: %v", logErr)
+			}
 		}
+
 		return diffResultMsg{
 			result:   result,
 			commits:  commits,
+			headSHA:  head.SHA,
 			repoRoot: repo.wt.Filesystem.Root(),
 			err:      err,
 		}
@@ -177,7 +190,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tickCmd(m.cfg.Interval)
 		}
 		m.fetching = true
-		return m, tea.Batch(fetchCmd(m.cfg), tickCmd(m.cfg.Interval))
+		return m, tea.Batch(fetchCmd(m.cfg, m.lastLogSHA), tickCmd(m.cfg.Interval))
 
 	case diffResultMsg:
 		m.fetching = false
@@ -187,6 +200,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.commits != nil {
 			m.commits = msg.commits
+			m.lastLogSHA = msg.headSHA
 		}
 		// Only update file data if in working tree mode.
 		if msg.result != nil && m.selectedCommit == -1 {
@@ -211,7 +225,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 		}
 		m.fetching = true
-		return m, fetchCmd(m.cfg)
+		return m, fetchCmd(m.cfg, m.lastLogSHA)
 
 	case commitResultMsg:
 		if msg.err != nil {
@@ -222,7 +236,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.focus = focusFiles
 		}
 		m.fetching = true
-		return m, fetchCmd(m.cfg)
+		return m, fetchCmd(m.cfg, m.lastLogSHA)
 
 	case commitDiffMsg:
 		// Only apply if this is still the selected commit.
