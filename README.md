@@ -76,4 +76,4 @@ Mouse: click to select files, scroll wheel to navigate or scroll.
 - [ ] Rethink keybinds
 - [ ] Hunk/file/line staging and committing
 - [ ] Display empty commits
-- [ ] Set up goreleaser
+- [x] Set up goreleaser
