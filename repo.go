@@ -7,6 +7,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/broothie/cob"
 	"github.com/go-git/go-billy/v5/osfs"
@@ -17,6 +18,13 @@ import (
 	"github.com/go-git/go-git/v5/utils/merkletrie"
 )
 
+// Cached git repository to avoid re-opening on every fetch.
+var (
+	cachedRepoMu sync.Mutex
+	cachedRepo   *git.Repository
+	cachedWT     *git.Worktree
+)
+
 // gitRepo implements Repo using go-git.
 type gitRepo struct {
 	repo     *git.Repository
@@ -25,36 +33,45 @@ type gitRepo struct {
 	headTree *object.Tree             // lazily resolved HEAD commit tree
 }
 
-// openRepo opens the nearest git repository from the current directory.
+// openRepo returns a gitRepo using a cached *git.Repository to avoid
+// re-opening the repo on every fetch cycle. Per-fetch caches (headTree,
+// indexMap) are fresh each time.
 func openRepo() (*gitRepo, error) {
-	debugf("openRepo: opening repository")
-	repo, err := git.PlainOpenWithOptions(".", &git.PlainOpenOptions{
-		DetectDotGit:          true,
-		EnableDotGitCommonDir: true,
-	})
-	if err != nil {
-		debugf("openRepo: failed: %v", err)
-		return nil, fmt.Errorf("not a git repository: %w", err)
+	cachedRepoMu.Lock()
+	defer cachedRepoMu.Unlock()
+
+	if cachedRepo == nil {
+		debugf("openRepo: opening repository (first time)")
+		repo, err := git.PlainOpenWithOptions(".", &git.PlainOpenOptions{
+			DetectDotGit:          true,
+			EnableDotGitCommonDir: true,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("not a git repository: %w", err)
+		}
+
+		wt, err := repo.Worktree()
+		if err != nil {
+			return nil, err
+		}
+		debugf("openRepo: root=%s", wt.Filesystem.Root())
+
+		// Load global and system gitignore patterns — go-git doesn't do this automatically.
+		rootFS := osfs.New("/")
+		if global, err := gitignore.LoadGlobalPatterns(rootFS); err == nil {
+			wt.Excludes = append(wt.Excludes, global...)
+		}
+		if system, err := gitignore.LoadSystemPatterns(rootFS); err == nil {
+			wt.Excludes = append(wt.Excludes, system...)
+		}
+
+		cachedRepo = repo
+		cachedWT = wt
+	} else {
+		debugf("openRepo: reusing cached repository")
 	}
 
-	wt, err := repo.Worktree()
-	if err != nil {
-		debugf("openRepo: worktree failed: %v", err)
-		return nil, err
-	}
-	debugf("openRepo: root=%s", wt.Filesystem.Root())
-
-	// Load global and system gitignore patterns — go-git doesn't do this automatically.
-	// These functions expect a filesystem rooted at /, not the worktree.
-	rootFS := osfs.New("/")
-	if global, err := gitignore.LoadGlobalPatterns(rootFS); err == nil {
-		wt.Excludes = append(wt.Excludes, global...)
-	}
-	if system, err := gitignore.LoadSystemPatterns(rootFS); err == nil {
-		wt.Excludes = append(wt.Excludes, system...)
-	}
-
-	return &gitRepo{repo: repo, wt: wt}, nil
+	return &gitRepo{repo: cachedRepo, wt: cachedWT}, nil
 }
 
 func (g *gitRepo) Head() (HeadInfo, error) {

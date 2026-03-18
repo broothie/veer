@@ -97,6 +97,13 @@ type model struct {
 	commitOffset   int
 	selectedCommit int // -1 = working tree, 0+ = index into commits
 	commitMsg      textarea.Model
+
+	// File watcher state.
+	watcherCh     <-chan struct{} // receives file change notifications
+	watcherClose  func()         // cleanup watcher resources
+	watcherReady  bool           // true once watcher is started
+	pendingChange bool           // change detected while a fetch was in progress
+	lastFetchAt   time.Time      // when the last fetch completed
 }
 
 func newModel(cfg config) model {
@@ -167,6 +174,15 @@ func fetchCmd(cfg config, lastLogSHA string) tea.Cmd {
 	}
 }
 
+func waitForChange(ch <-chan struct{}) tea.Cmd {
+	return func() tea.Msg {
+		if _, ok := <-ch; !ok {
+			return nil
+		}
+		return filesChangedMsg{}
+	}
+}
+
 func commitDiffCmd(sha string) tea.Cmd {
 	return func() tea.Msg {
 		repo, err := openRepo()
@@ -185,16 +201,48 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.recalcLayout()
 
-	case tickMsg:
+	case filesChangedMsg:
+		cmds := []tea.Cmd{waitForChange(m.watcherCh)}
 		if m.fetching {
-			return m, tickCmd(m.cfg.Interval)
+			m.pendingChange = true
+			return m, tea.Batch(cmds...)
 		}
 		m.fetching = true
-		return m, tea.Batch(fetchCmd(m.cfg, m.lastLogSHA), tickCmd(m.cfg.Interval))
+		m.pendingChange = false
+		cmds = append(cmds, fetchCmd(m.cfg, m.lastLogSHA))
+		return m, tea.Batch(cmds...)
+
+	case tickMsg:
+		cmds := []tea.Cmd{tickCmd(m.cfg.Interval)}
+		if m.fetching {
+			return m, tea.Batch(cmds...)
+		}
+		// When the watcher is active, tick is a fallback — only fetch
+		// if enough time has passed since the last fetch.
+		if m.watcherReady && time.Since(m.lastFetchAt) < m.cfg.Interval*5 {
+			return m, tea.Batch(cmds...)
+		}
+		m.fetching = true
+		cmds = append(cmds, fetchCmd(m.cfg, m.lastLogSHA))
+		return m, tea.Batch(cmds...)
 
 	case diffResultMsg:
 		m.fetching = false
+		m.lastFetchAt = time.Now()
 		m.err = msg.err
+
+		// Start file watcher on first successful fetch.
+		var cmds []tea.Cmd
+		if !m.watcherReady && msg.repoRoot != "" {
+			ch, cleanup := startWatcher(msg.repoRoot)
+			if ch != nil {
+				m.watcherCh = ch
+				m.watcherClose = cleanup
+				m.watcherReady = true
+				cmds = append(cmds, waitForChange(ch))
+			}
+		}
+
 		if msg.repoRoot != "" {
 			m.repoRoot = msg.repoRoot
 		}
@@ -218,6 +266,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			m.viewport.SetYOffset(prevYOffset)
 			m.syncCursorToScroll()
+		}
+
+		// Re-fetch immediately if changes arrived during this fetch.
+		if m.pendingChange {
+			m.pendingChange = false
+			m.fetching = true
+			cmds = append(cmds, fetchCmd(m.cfg, m.lastLogSHA))
+		}
+
+		if len(cmds) > 0 {
+			return m, tea.Batch(cmds...)
 		}
 
 	case stageResultMsg:
