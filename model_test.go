@@ -318,6 +318,9 @@ func TestRenderHeader_ContainsParts(t *testing.T) {
 	if !strings.Contains(header, "test commit") {
 		t.Error("header should contain message")
 	}
+	if !strings.Contains(header, "|") {
+		t.Error("header should use pipe separators")
+	}
 }
 
 func TestRenderHeader_TruncatesLongMessage(t *testing.T) {
@@ -386,6 +389,9 @@ func TestRenderStatus_FocusHints(t *testing.T) {
 	status := m.renderStatus()
 	if !strings.Contains(status, "s: stage") {
 		t.Error("file-focused status should show stage hint")
+	}
+	if !strings.Contains(status, "|") {
+		t.Error("status should use pipe separators")
 	}
 
 	m.focus = focusCommits

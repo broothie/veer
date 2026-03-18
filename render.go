@@ -12,7 +12,7 @@ var (
 	styleScrollThumbActive = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
 	styleScrollTrack       = lipgloss.NewStyle().Foreground(lipgloss.Color("239"))
 	styleScrollTrackActive = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-	styleBar               = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("237"))
+	styleBar               = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
 	stylePaneBorder        = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	stylePaneBorderActive  = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true)
 	stylePaneTitle         = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
@@ -74,7 +74,7 @@ func renderEmptyColumn(height int) string {
 }
 
 func (m model) renderHeader() string {
-	sep := " · "
+	sep := " | "
 
 	var parts []string
 	if m.cwd != "" {
@@ -101,8 +101,6 @@ func (m model) renderHeader() string {
 
 	line := strings.Join(parts, styleBar.Render(sep))
 
-	// Append commit message, truncating if needed.
-	// Render with explicit bar background to prevent SHA style reset from clearing it.
 	if m.message != "" {
 		sepStr := sep
 		avail := m.width - lipgloss.Width(line) - lipgloss.Width(sepStr) - 1 // 1 for leading space
@@ -284,14 +282,14 @@ func (m model) renderStatus() string {
 		if m.hasStaged() {
 			parts = append([]string{"u: unstage all", "c: commit"}, parts...)
 		}
-		hint = strings.Join(parts, "  ")
+		hint = strings.Join(parts, " | ")
 	case focusCommitMsg:
-		hint = "^d: commit  esc: cancel  tab: next"
+		hint = "^d: commit | esc: cancel | tab: next"
 	case focusCommits:
-		hint = "enter: select  tab: next  q: quit"
+		hint = "enter: select | tab: next | q: quit"
 	case focusDiff:
 		parts := []string{"s: stage hunk", "tab: files", "j/k ↑↓  ^f/^b: page", "q: quit"}
-		hint = strings.Join(parts, "  ")
+		hint = strings.Join(parts, " | ")
 	}
 
 	return styleBar.Width(m.width).Render(styleBar.Render(" " + hint))
