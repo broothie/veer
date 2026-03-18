@@ -236,7 +236,7 @@ func (g *gitRepo) DiffCommit(sha string) ([]FileDiff, error) {
 			newContent = treeFileContent(commitTree, path)
 		}
 
-		lines, added, removed, err := buildDiffLines(path, oldContent, newContent, 3)
+		lines, _, added, removed, err := buildDiffLines(path, oldContent, newContent, 3)
 		if err != nil || len(lines) == 0 {
 			continue
 		}

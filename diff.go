@@ -36,10 +36,18 @@ type DiffResult struct {
 	Files   []FileDiff
 }
 
+// Hunk holds a single diff hunk with its raw lines for patch reconstruction.
+type Hunk struct {
+	Header   string   // raw @@ line
+	RawLines []string // all raw lines including @@ header
+	Section  string   // "staged", "unstaged", or ""
+}
+
 // FileDiff holds the structured diff for a single file.
 type FileDiff struct {
 	Path     string
 	Lines    []DiffLine
+	Hunks    []Hunk
 	Added    int
 	Removed  int
 	Staged   bool
@@ -162,14 +170,18 @@ func buildFileDiff(repo Repo, path string, fc FileChange, cfg config) FileDiff {
 }
 
 func appendDiffSection(fd *FileDiff, path, old, new, label string, showLabel bool, context int) {
-	lines, added, removed, err := buildDiffLines(path, old, new, context)
+	lines, hunks, added, removed, err := buildDiffLines(path, old, new, context)
 	if err != nil || len(lines) == 0 {
 		return
 	}
-	if showLabel {
-		fd.Lines = append(fd.Lines, DiffLine{Type: LineHeader, Content: label})
+	for i := range hunks {
+		hunks[i].Section = label
+	}
+	if showLabel && len(fd.Lines) > 0 {
+		fd.Lines = append(fd.Lines, DiffLine{Type: LineSeparator})
 	}
 	fd.Lines = append(fd.Lines, lines...)
+	fd.Hunks = append(fd.Hunks, hunks...)
 	fd.Added += added
 	fd.Removed += removed
 }
@@ -205,7 +217,7 @@ func fetchRefDiff(repo Repo, cfg config, result *DiffResult) (*DiffResult, error
 		refContent := repo.RefContent(cfg.Ref, path)
 		worktreeContent := repo.WorktreeContent(path)
 
-		lines, added, removed, err := buildDiffLines(path, refContent, worktreeContent, cfg.Context)
+		lines, _, added, removed, err := buildDiffLines(path, refContent, worktreeContent, cfg.Context)
 		if err != nil || len(lines) == 0 {
 			continue
 		}
@@ -221,8 +233,8 @@ func fetchRefDiff(repo Repo, cfg config, result *DiffResult) (*DiffResult, error
 	return result, nil
 }
 
-// buildDiffLines computes a unified diff and parses it into structured DiffLines.
-func buildDiffLines(path, old, new string, context int) ([]DiffLine, int, int, error) {
+// buildDiffLines computes a unified diff and parses it into structured DiffLines and Hunks.
+func buildDiffLines(path, old, new string, context int) ([]DiffLine, []Hunk, int, int, error) {
 	ud := difflib.UnifiedDiff{
 		A:        difflib.SplitLines(old),
 		B:        difflib.SplitLines(new),
@@ -232,16 +244,19 @@ func buildDiffLines(path, old, new string, context int) ([]DiffLine, int, int, e
 	}
 	text, err := difflib.GetUnifiedDiffString(ud)
 	if err != nil || text == "" {
-		return nil, 0, 0, err
+		return nil, nil, 0, 0, err
 	}
 	rawLines := strings.Split(strings.TrimRight(text, "\n"), "\n")
 	return parseUnifiedDiff(rawLines)
 }
 
 // parseUnifiedDiff converts raw unified diff lines into structured DiffLines
-// with line numbers and type annotations.
-func parseUnifiedDiff(rawLines []string) ([]DiffLine, int, int, error) {
+// with line numbers and type annotations. Also returns structured Hunks for staging.
+func parseUnifiedDiff(rawLines []string) ([]DiffLine, []Hunk, int, int, error) {
 	var lines []DiffLine
+	var hunks []Hunk
+	var curHunkRaw []string
+	var curHunkHeader string
 	var oldNum, newNum int
 	added, removed := 0, 0
 	firstHunk := true
@@ -252,10 +267,15 @@ func parseUnifiedDiff(rawLines []string) ([]DiffLine, int, int, error) {
 			// skip file headers
 
 		case strings.HasPrefix(raw, "@@"):
+			// Save previous hunk.
 			if !firstHunk {
+				hunks = append(hunks, Hunk{Header: curHunkHeader, RawLines: curHunkRaw})
 				lines = append(lines, DiffLine{Type: LineSeparator})
 			}
 			firstHunk = false
+			curHunkHeader = raw
+			curHunkRaw = []string{raw}
+
 			var os, oc, ns, nc int
 			if _, err := fmt.Sscanf(raw, "@@ -%d,%d +%d,%d @@", &os, &oc, &ns, &nc); err != nil {
 				continue
@@ -264,6 +284,7 @@ func parseUnifiedDiff(rawLines []string) ([]DiffLine, int, int, error) {
 			newNum = ns
 
 		case strings.HasPrefix(raw, "+"):
+			curHunkRaw = append(curHunkRaw, raw)
 			lines = append(lines, DiffLine{
 				Type:    LineAdded,
 				NewNum:  newNum,
@@ -273,6 +294,7 @@ func parseUnifiedDiff(rawLines []string) ([]DiffLine, int, int, error) {
 			added++
 
 		case strings.HasPrefix(raw, "-"):
+			curHunkRaw = append(curHunkRaw, raw)
 			lines = append(lines, DiffLine{
 				Type:    LineRemoved,
 				OldNum:  oldNum,
@@ -282,6 +304,7 @@ func parseUnifiedDiff(rawLines []string) ([]DiffLine, int, int, error) {
 			removed++
 
 		default:
+			curHunkRaw = append(curHunkRaw, raw)
 			content := raw
 			if len(raw) > 0 && raw[0] == ' ' {
 				content = raw[1:]
@@ -297,7 +320,12 @@ func parseUnifiedDiff(rawLines []string) ([]DiffLine, int, int, error) {
 		}
 	}
 
-	return lines, added, removed, nil
+	// Save last hunk.
+	if !firstHunk {
+		hunks = append(hunks, Hunk{Header: curHunkHeader, RawLines: curHunkRaw})
+	}
+
+	return lines, hunks, added, removed, nil
 }
 
 // matchesFilters returns true if path is under any of the filter prefixes,

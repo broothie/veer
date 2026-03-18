@@ -44,6 +44,15 @@ Veer is a live-diffing fullscreen TUI built with [Bubble Tea](https://github.com
 3. `rebuildDiffContent()` regenerates viewport string if `diffGen` changed
 4. `View()` composes: header | sidebar+scrollbar | viewport+scrollbar | status bar
 
+### Staging and Committing
+
+- **stage.go** — Git staging/commit operations that shell out to `git` (not go-git). `stageFileCmd`, `unstageFileCmd`, `unstageAllCmd`, `stageHunkCmd`, `commitStagedCmd`. Uses `buildPatch()` to construct unified diffs for hunk-level staging via `git apply --cached`.
+- **Hunk struct** (`diff.go`): Groups raw diff lines per hunk, preserved during parsing for patch reconstruction. Each hunk tracks its `Section` ("staged"/"unstaged") set by `appendDiffSection`.
+- **hunkRefs** (`model.go`/`render.go`): Maps viewport lines to `(fileIdx, hunkIdx)` pairs, built during `buildDiffContent()`. Used to determine which hunk to stage when `s` is pressed in the diff view.
+- **Commit message input**: `textinput.Model` from bubbles, rendered in the sidebar between file tree and commit list. `focusCommitMsg` focus area handles key delegation to the textinput.
+- **Four focus areas**: `focusFiles` / `focusCommitMsg` / `focusCommits` / `focusDiff`
+- Staging disabled when viewing historical commits or ref-based diffs (`isWorkingTree()` guard).
+
 ### Ref-based Diffing
 
 `veer <ref>` diffs working tree against an arbitrary ref. Uses `object.DiffTree(refTree, headTree)` to find changed files, unions with `Status()` for worktree changes, then diffs ref content vs worktree content per file.

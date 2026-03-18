@@ -166,29 +166,32 @@ func TestFetchDiff_StagedAndUnstaged(t *testing.T) {
 		t.Error("should be both staged and unstaged")
 	}
 
-	// Should have section headers when both staged and unstaged.
-	headers := 0
+	// Should have a separator between staged and unstaged sections.
+	seps := 0
 	for _, l := range f.Lines {
-		if l.Type == LineHeader {
-			headers++
+		if l.Type == LineSeparator {
+			seps++
 		}
 	}
-	if headers != 2 {
-		t.Errorf("got %d section headers, want 2 (staged + unstaged)", headers)
+	if seps < 1 {
+		t.Errorf("got %d separators, want at least 1 between sections", seps)
 	}
 
-	// First header should be "staged", second "unstaged".
-	headerIdx := 0
-	for _, l := range f.Lines {
-		if l.Type == LineHeader {
-			if headerIdx == 0 && l.Content != "staged" {
-				t.Errorf("first header = %q, want %q", l.Content, "staged")
-			}
-			if headerIdx == 1 && l.Content != "unstaged" {
-				t.Errorf("second header = %q, want %q", l.Content, "unstaged")
-			}
-			headerIdx++
+	// Should have hunks from both sections.
+	if len(f.Hunks) < 2 {
+		t.Errorf("got %d hunks, want at least 2 (staged + unstaged)", len(f.Hunks))
+	}
+	hasStaged, hasUnstaged := false, false
+	for _, h := range f.Hunks {
+		if h.Section == "staged" {
+			hasStaged = true
 		}
+		if h.Section == "unstaged" {
+			hasUnstaged = true
+		}
+	}
+	if !hasStaged || !hasUnstaged {
+		t.Errorf("hunks should have both staged and unstaged sections, got staged=%v unstaged=%v", hasStaged, hasUnstaged)
 	}
 }
 
@@ -205,10 +208,10 @@ func TestFetchDiff_StagedOnly_NoHeaders(t *testing.T) {
 	}
 
 	f := result.Files[0]
-	for _, l := range f.Lines {
-		if l.Type == LineHeader {
-			t.Error("should not have section headers when only staged")
-		}
+	// With only one section, there should be no separator between sections
+	// (only within-section separators if multiple hunks).
+	if len(f.Hunks) > 0 && f.Hunks[0].Section != "staged" {
+		t.Errorf("single-section hunk should be staged, got %q", f.Hunks[0].Section)
 	}
 }
 
@@ -322,13 +325,17 @@ func TestParseUnifiedDiff(t *testing.T) {
 		" line3",
 	}
 
-	lines, added, removed, err := parseUnifiedDiff(raw)
+	lines, hunks, added, removed, err := parseUnifiedDiff(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	if added != 1 || removed != 1 {
 		t.Errorf("added=%d removed=%d, want 1,1", added, removed)
+	}
+
+	if len(hunks) != 1 {
+		t.Fatalf("got %d hunks, want 1", len(hunks))
 	}
 
 	if len(lines) != 4 {
@@ -377,13 +384,17 @@ func TestParseUnifiedDiff_MultipleHunks(t *testing.T) {
 		"+add2",
 	}
 
-	lines, added, _, err := parseUnifiedDiff(raw)
+	lines, hunks, added, _, err := parseUnifiedDiff(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	if added != 2 {
 		t.Errorf("added = %d, want 2", added)
+	}
+
+	if len(hunks) != 2 {
+		t.Errorf("got %d hunks, want 2", len(hunks))
 	}
 
 	// Should have a separator between hunks.
@@ -403,7 +414,7 @@ func TestBuildDiffLines(t *testing.T) {
 	old := "aaa\nbbb\nccc\n"
 	new := "aaa\nBBB\nccc\n"
 
-	lines, added, removed, err := buildDiffLines("test.txt", old, new, 3)
+	lines, _, added, removed, err := buildDiffLines("test.txt", old, new, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -419,7 +430,7 @@ func TestBuildDiffLines(t *testing.T) {
 
 func TestBuildDiffLines_Identical(t *testing.T) {
 	content := "same\n"
-	lines, _, _, err := buildDiffLines("test.txt", content, content, 3)
+	lines, _, _, _, err := buildDiffLines("test.txt", content, content, 3)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -17,14 +17,10 @@ type treeEntry struct {
 }
 
 func (m model) renderSidebar(height int) string {
-	fileH, commitStart := m.sidebarSplit()
+	fileH, msgH, _ := m.sidebarSplit()
 
 	// File tree section.
 	fileSection := m.renderFileTree(fileH)
-
-	// Commit list section.
-	commitH := height - fileH
-	commitSection := m.renderCommitList(commitH)
 
 	lines := make([]string, 0, height)
 
@@ -35,18 +31,57 @@ func (m model) renderSidebar(height int) string {
 		lines = append(lines, "")
 	}
 
-	// Commit list lines.
+	// Commit message section.
+	if msgH > 0 {
+		msgLines := m.renderCommitInput()
+		lines = append(lines, msgLines...)
+		for len(lines) < fileH+msgH {
+			lines = append(lines, "")
+		}
+	}
+
+	// Commit list section.
+	commitH := height - fileH - msgH
+	commitSection := m.renderCommitList(commitH)
 	commitLines := strings.Split(commitSection, "\n")
 	lines = append(lines, commitLines...)
 	for len(lines) < height {
 		lines = append(lines, "")
 	}
 
-	_ = commitStart
 	return styleSidebar.
 		Width(m.sidebarWidth + sidebarPad).
 		Height(height).
 		Render(strings.Join(lines[:height], "\n"))
+}
+
+func (m model) renderCommitInput() []string {
+	label := " commit "
+	lineWidth := m.sidebarWidth - lipgloss.Width(label)
+	if lineWidth < 0 {
+		lineWidth = 0
+	}
+	header := styleFaint.Render(label + strings.Repeat("─", lineWidth))
+
+	if m.focus == focusCommitMsg {
+		m.commitMsg.SetWidth(m.sidebarWidth)
+		view := m.commitMsg.View()
+		viewLines := strings.Split(view, "\n")
+		result := []string{header}
+		result = append(result, viewLines...)
+		// Pad to exactly 3 input lines.
+		for len(result) < 4 {
+			result = append(result, "")
+		}
+		return result[:4]
+	}
+
+	return []string{
+		header,
+		styleFaint.Render(" c: type message"),
+		"",
+		"",
+	}
 }
 
 func (m model) renderFileTree(height int) string {
@@ -80,13 +115,9 @@ func (m model) renderCommitList(height int) string {
 
 	var lines []string
 
-	// Branch/ref header line.
-	branch := m.branch
-	if branch == "" && m.sha != "" {
-		branch = m.sha
-	}
-	if branch != "" {
-		label := " " + branch + " "
+	// History header line.
+	{
+		label := " history "
 		lineWidth := m.sidebarWidth - lipgloss.Width(label)
 		if lineWidth < 0 {
 			lineWidth = 0
@@ -95,29 +126,28 @@ func (m model) renderCommitList(height int) string {
 		height-- // consume one row
 	}
 
-	total := len(m.commits) + 1 // +1 for working tree entry
+	total := len(m.commits) + 1 // +1 for HEAD entry
 
 	start := m.commitOffset
 	end := min(start+height, total)
 
 	for i := start; i < end; i++ {
 		if i == 0 {
-			// Working tree entry.
+			// HEAD entry.
 			prefix := "  "
 			if m.commitCursor == 0 && m.focus == focusCommits {
 				prefix = "> "
 			}
-			label := "working tree"
+			headLabel := "HEAD"
+			if m.branch != "" {
+				headLabel += " (" + m.branch + ")"
+			}
 			if m.selectedCommit == -1 {
-				label = styleActive.Render("● ") + label
+				headLabel = styleActive.Render("● ") + headLabel
 			} else {
-				label = styleFaint.Render("○ ") + label
+				headLabel = styleFaint.Render("○ ") + headLabel
 			}
-			line := prefix + label
-			if m.commitCursor == 0 && m.focus == focusCommits {
-				line = prefix + label
-			}
-			lines = append(lines, line)
+			lines = append(lines, prefix+headLabel)
 		} else {
 			ci := i - 1
 			if ci >= len(m.commits) {
