@@ -357,21 +357,27 @@ func (m model) renderHeader() string {
 		parts = append(parts, m.message)
 	}
 
-	line := strings.Join(parts, styleFaint.Render(" · "))
+	sep := styleFaint.Render(" · ")
 
-	// Truncate to terminal width — drop message first.
-	if lipgloss.Width(line) > m.width {
-		var short []string
-		if m.cwd != "" {
-			short = append(short, styleFaint.Render(m.cwd))
+	// Build the line without the message to see how much room is left for it.
+	base := strings.Join(parts[:len(parts)-1], sep)
+	if m.message == "" {
+		base = strings.Join(parts, sep)
+	}
+
+	line := strings.Join(parts, sep)
+	avail := m.width - lipgloss.Width(base) - lipgloss.Width(sep) - 2 // 1 leading space + margin
+
+	if m.message != "" && avail < len(m.message) {
+		if avail > 3 {
+			truncated := make([]string, len(parts)-1)
+			copy(truncated, parts[:len(parts)-1])
+			truncated = append(truncated, m.message[:avail-1]+"…")
+			line = strings.Join(truncated, sep)
+		} else {
+			// No room for the message at all.
+			line = base
 		}
-		if m.branch != "" {
-			short = append(short, styleBranch.Render(m.branch))
-		}
-		if m.sha != "" {
-			short = append(short, styleSHA.Render(m.sha))
-		}
-		line = strings.Join(short, styleFaint.Render(" · "))
 	}
 
 	return " " + line + "\n"
