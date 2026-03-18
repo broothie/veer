@@ -291,6 +291,16 @@ func (m model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) buildDiffContent() string {
+	if len(m.files) == 0 {
+		vpWidth := max(1, m.width-sidebarWidth-sidebarPad-1)
+		vpHeight := m.mainHeight()
+		return lipgloss.NewStyle().
+			Width(vpWidth).
+			Height(vpHeight).
+			Align(lipgloss.Center, lipgloss.Center).
+			Render(styleFaint.Render("no changes"))
+	}
+
 	if m.cursor >= len(m.files) {
 		return ""
 	}
@@ -415,15 +425,20 @@ func (m model) renderHeader() string {
 }
 
 func (m model) renderSidebar(height int) string {
-	var lines []string
-
 	if len(m.tree) == 0 {
 		msg := "no changes"
 		if m.err != nil {
 			msg = "error"
 		}
-		lines = append(lines, styleFaint.Render(msg))
-	} else {
+		return styleSidebar.
+			Width(sidebarWidth + sidebarPad).
+			Height(height).
+			Align(lipgloss.Center, lipgloss.Center).
+			Render(styleFaint.Render(msg))
+	}
+
+	var lines []string
+	{
 		start := m.sidebarOffset
 		end := min(start+height, len(m.tree))
 
