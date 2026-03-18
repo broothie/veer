@@ -13,7 +13,11 @@ import (
 // theme holds the resolved chroma style for syntax highlighting.
 var theme *chroma.Style
 
-func initTheme(name string) {
+func initTheme(name string, enabled bool) {
+	if !enabled {
+		theme = nil
+		return
+	}
 	theme = styles.Get(name)
 }
 
@@ -27,6 +31,9 @@ type highlightedLine struct {
 // tokenization since the lexer is created once and processes all content together.
 func highlightFile(filename string, lines []DiffLine) []highlightedLine {
 	result := make([]highlightedLine, len(lines))
+	if theme == nil {
+		return result
+	}
 
 	lexer := lexers.Match(filename)
 	if lexer == nil {

@@ -430,6 +430,27 @@ func TestBuildDiffContent_AllFilesRendered(t *testing.T) {
 	}
 }
 
+func TestRenderHighlighted_Disabled(t *testing.T) {
+	line := DiffLine{Type: LineContext, NewNum: 1, Content: "package main"}
+
+	initTheme("dracula", true)
+	t.Cleanup(func() { theme = nil })
+
+	enabled := highlightFile("main.go", []DiffLine{line})[0]
+	if len(enabled.tokens) == 0 {
+		t.Fatal("enabled syntax highlighting should tokenize file content")
+	}
+
+	initTheme("dracula", false)
+	disabled := highlightFile("main.go", []DiffLine{line})[0]
+	if len(disabled.tokens) != 0 {
+		t.Fatalf("disabled syntax highlighting should skip tokenization, got %d tokens", len(disabled.tokens))
+	}
+	if got := renderHighlighted(disabled, line.Content); got != line.Content {
+		t.Fatalf("disabled syntax highlighting = %q, want %q", got, line.Content)
+	}
+}
+
 // --- renderDiffLine ---
 
 func TestRenderDiffLine_AllTypes(t *testing.T) {

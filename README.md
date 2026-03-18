@@ -47,6 +47,7 @@ veer -n 1s              # refresh every 1 second
 veer -w 40              # initial sidebar width of 40 (default 35)
 veer -t monokai         # use monokai syntax theme (default dracula)
 veer --dump-view > /tmp/veer.txt  # render one frame to stdout and exit
+veer --no-syntax-highlight  # disable syntax highlighting
 veer -d                 # enable debug logging to ~/.veer/debug.log
 ```
 
@@ -66,7 +67,7 @@ veer -d                 # enable debug logging to ~/.veer/debug.log
 - [ ] Display empty commits
 - [ ] Dynamic sidebar width based on window size
 - [ ] Resizable git history pane
-- [ ] Flag to disable syntax highlighting
+- [x] Flag to disable syntax highlighting
 - [ ] Add linux to goreleaser
 - [ ] Ensure README matches implementation
 - [ ] Flesh out tests
