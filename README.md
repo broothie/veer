@@ -60,7 +60,14 @@ veer -t monokai         # use monokai syntax theme (default dracula)
 - [x] Refactor everything
 - [ ] Expandable ellipsis
 - [x] Rethink keybinds
-- [ ] Hunk/file/line staging and committing
+- [x] Hunk/file staging and committing
 - [ ] Display empty commits
+- [ ] Dynamic sidebar width based on window size
+- [ ] Resizable git history pane
+- [ ] Flag to disable syntax highlighting
+- [ ] Add linux to goreleaser
+- [ ] Ensure README matches implementation
+- [ ] Flesh out tests
+- [ ] Run go vet in CI
 - [x] Set up goreleaser
 - [x] Syntax highlighting

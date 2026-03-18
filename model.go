@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -23,6 +24,7 @@ type focusArea int
 
 const (
 	focusFiles focusArea = iota
+	focusCommitMsg
 	focusCommits
 	focusDiff
 )
@@ -44,12 +46,19 @@ var (
 	styleFilePath = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")).Background(lipgloss.Color("237"))
 )
 
+// hunkRef maps a viewport line to a file and hunk index.
+type hunkRef struct {
+	fileIdx int
+	hunkIdx int // -1 for non-hunk lines (headers, separators)
+}
+
 type (
 	tickMsg       struct{}
 	diffResultMsg struct {
-		result  *DiffResult
-		commits []CommitInfo
-		err     error
+		result   *DiffResult
+		commits  []CommitInfo
+		repoRoot string
+		err      error
 	}
 	commitDiffMsg struct {
 		sha   string
@@ -66,6 +75,7 @@ type model struct {
 	sha            string
 	message        string
 	cwd            string
+	repoRoot       string
 	cursor         int
 	sidebarOffset  int
 	viewport       viewport.Model
@@ -76,13 +86,15 @@ type model struct {
 	dragging       bool
 	err            error
 	fetching       bool
-	diffGen        uint64 // incremented when files change
-	lastBuiltGen   uint64 // gen when diff content was last built
-	fileOffsets    []int  // line offset where each file starts in the viewport
+	diffGen        uint64    // incremented when files change
+	lastBuiltGen   uint64    // gen when diff content was last built
+	fileOffsets    []int     // line offset where each file starts in the viewport
+	hunkRefs       []hunkRef // maps viewport lines to file+hunk indices
 	commits        []CommitInfo
 	commitCursor   int // 0 = "working tree", 1+ = commits[i-1]
 	commitOffset   int
 	selectedCommit int // -1 = working tree, 0+ = index into commits
+	commitMsg      textarea.Model
 }
 
 func newModel(cfg config) model {
@@ -96,12 +108,18 @@ func newModel(cfg config) model {
 	} else if sw > maxSidebarWidth {
 		sw = maxSidebarWidth
 	}
+	ti := textarea.New()
+	ti.Placeholder = "commit message"
+	ti.CharLimit = 500
+	ti.SetHeight(3)
+	ti.ShowLineNumbers = false
 	return model{
 		cfg:            cfg,
 		focus:          focusFiles,
 		cwd:            cwd,
 		sidebarWidth:   sw,
 		selectedCommit: -1,
+		commitMsg:      ti,
 	}
 }
 
@@ -117,11 +135,16 @@ func fetchCmd(cfg config) tea.Cmd {
 	return func() tea.Msg {
 		repo, err := openRepo()
 		if err != nil {
-			return diffResultMsg{nil, nil, err}
+			return diffResultMsg{err: err}
 		}
 		result, err := fetchDiff(repo, cfg)
 		commits, _ := repo.Log(50)
-		return diffResultMsg{result, commits, err}
+		return diffResultMsg{
+			result:   result,
+			commits:  commits,
+			repoRoot: repo.wt.Filesystem.Root(),
+			err:      err,
+		}
 	}
 }
 
@@ -153,6 +176,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case diffResultMsg:
 		m.fetching = false
 		m.err = msg.err
+		if msg.repoRoot != "" {
+			m.repoRoot = msg.repoRoot
+		}
 		if msg.commits != nil {
 			m.commits = msg.commits
 		}
@@ -173,6 +199,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.SetYOffset(prevYOffset)
 			m.syncCursorToScroll()
 		}
+
+	case stageResultMsg:
+		if msg.err != nil {
+			m.err = msg.err
+		}
+		m.fetching = true
+		return m, fetchCmd(m.cfg)
+
+	case commitResultMsg:
+		if msg.err != nil {
+			m.err = msg.err
+		} else {
+			m.commitMsg.Reset()
+			m.commitMsg.Blur()
+			m.focus = focusFiles
+		}
+		m.fetching = true
+		return m, fetchCmd(m.cfg)
 
 	case commitDiffMsg:
 		// Only apply if this is still the selected commit.
@@ -252,10 +296,169 @@ func (m *model) rebuildDiffContent() {
 }
 
 func (m model) inSidebar() bool {
-	return m.focus == focusFiles || m.focus == focusCommits
+	return m.focus == focusFiles || m.focus == focusCommitMsg || m.focus == focusCommits
+}
+
+func (m model) isWorkingTree() bool {
+	return m.selectedCommit == -1 && m.cfg.Ref == ""
+}
+
+func (m model) hasStaged() bool {
+	for _, f := range m.files {
+		if f.Staged {
+			return true
+		}
+	}
+	return false
+}
+
+func (m model) commitMsgVisible() bool {
+	return m.isWorkingTree() && (m.hasStaged() || m.focus == focusCommitMsg)
+}
+
+func (m *model) toggleStage() tea.Cmd {
+	if !m.isWorkingTree() || m.repoRoot == "" {
+		return nil
+	}
+	switch m.focus {
+	case focusFiles:
+		return m.toggleStageFile()
+	case focusDiff:
+		return m.stageCurrentHunk()
+	}
+	return nil
+}
+
+func (m *model) toggleStageFile() tea.Cmd {
+	return m.stageFileAt(m.cursor)
+}
+
+func (m *model) stageFileAt(idx int) tea.Cmd {
+	if !m.isWorkingTree() || m.repoRoot == "" {
+		return nil
+	}
+	if idx < 0 || idx >= len(m.files) {
+		return nil
+	}
+	f := m.files[idx]
+	if f.Unstaged {
+		return stageFileCmd(m.repoRoot, f.Path)
+	}
+	if f.Staged {
+		return unstageFileCmd(m.repoRoot, f.Path)
+	}
+	return nil
+}
+
+func (m *model) stageHunkAtY(y int) tea.Cmd {
+	if !m.isWorkingTree() || m.repoRoot == "" {
+		return nil
+	}
+	vpLine := (y - headerHeight) + m.viewport.YOffset
+	if vpLine < 0 || vpLine >= len(m.hunkRefs) {
+		return nil
+	}
+	ref := m.hunkRefs[vpLine]
+	if ref.hunkIdx < 0 || ref.fileIdx < 0 {
+		return nil
+	}
+	f := m.files[ref.fileIdx]
+	if ref.hunkIdx >= len(f.Hunks) {
+		return nil
+	}
+	hunk := f.Hunks[ref.hunkIdx]
+	if hunk.Section == "staged" {
+		return nil
+	}
+	return stageHunkCmd(m.repoRoot, f.Path, hunk)
+}
+
+func (m *model) stageCurrentHunk() tea.Cmd {
+	yOff := m.viewport.YOffset
+	if yOff < 0 || yOff >= len(m.hunkRefs) {
+		return nil
+	}
+
+	// Find the hunk at or near the top of the viewport.
+	ref := m.hunkRefs[yOff]
+	if ref.hunkIdx < 0 {
+		// Look forward for the nearest content line.
+		for y := yOff + 1; y < len(m.hunkRefs); y++ {
+			if m.hunkRefs[y].hunkIdx >= 0 {
+				ref = m.hunkRefs[y]
+				break
+			}
+		}
+	}
+	if ref.hunkIdx < 0 || ref.fileIdx < 0 {
+		return nil
+	}
+
+	f := m.files[ref.fileIdx]
+	if ref.hunkIdx >= len(f.Hunks) {
+		return nil
+	}
+
+	hunk := f.Hunks[ref.hunkIdx]
+	if hunk.Section == "staged" {
+		return nil // already staged
+	}
+
+	return stageHunkCmd(m.repoRoot, f.Path, hunk)
+}
+
+func (m *model) unstageAll() tea.Cmd {
+	if !m.isWorkingTree() || m.repoRoot == "" || !m.hasStaged() {
+		return nil
+	}
+	return unstageAllCmd(m.repoRoot)
+}
+
+func (m *model) focusCommitMessage() tea.Cmd {
+	if !m.isWorkingTree() {
+		return nil
+	}
+	m.focus = focusCommitMsg
+	return m.commitMsg.Focus()
+}
+
+func (m model) submitCommit() (tea.Model, tea.Cmd) {
+	msg := strings.TrimSpace(m.commitMsg.Value())
+	if msg == "" || m.repoRoot == "" {
+		return m, nil
+	}
+	m.commitMsg.Reset()
+	m.commitMsg.Blur()
+	m.focus = focusFiles
+	return m, commitStagedCmd(m.repoRoot, msg)
 }
 
 func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Commit message input handles its own keys.
+	if m.focus == focusCommitMsg {
+		switch msg.String() {
+		case "esc":
+			m.commitMsg.Blur()
+			m.commitMsg.Reset()
+			m.focus = focusFiles
+			return m, nil
+		case "ctrl+d":
+			return m.submitCommit()
+		case "tab":
+			m.commitMsg.Blur()
+			m.cycleTab(1)
+			return m, nil
+		case "shift+tab":
+			m.commitMsg.Blur()
+			m.cycleTab(-1)
+			return m, nil
+		default:
+			var cmd tea.Cmd
+			m.commitMsg, cmd = m.commitMsg.Update(msg)
+			return m, cmd
+		}
+	}
+
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
@@ -277,52 +480,47 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.diffScroll(func(v *viewport.Model) { v.ViewUp() })
 	case "enter":
 		return m.keyOpen()
+	case "s":
+		return m, m.toggleStage()
+	case "u":
+		return m, m.unstageAll()
+	case "c":
+		return m, m.focusCommitMessage()
 	}
 	return m, nil
 }
 
 // cycleTab advances focus forward (dir=1) or backward (dir=-1).
-// Order: focusFiles → focusCommits → focusDiff → focusFiles
+// Order: focusFiles → focusCommitMsg → focusCommits → focusDiff → focusFiles
 func (m *model) cycleTab(dir int) {
 	hasCommits := len(m.commits) > 0
 	hasFiles := len(m.files) > 0
+	hasCommitMsg := m.commitMsgVisible()
 
-	switch m.focus {
-	case focusFiles:
-		if dir > 0 {
-			if hasCommits {
-				m.focus = focusCommits
-			} else if hasFiles {
-				m.focus = focusDiff
-			}
-		} else {
-			if hasFiles {
-				m.focus = focusDiff
-			} else if hasCommits {
-				m.focus = focusCommits
-			}
-		}
-	case focusCommits:
-		if dir > 0 {
-			if hasFiles {
-				m.focus = focusDiff
-			} else {
-				m.focus = focusFiles
-			}
-		} else {
-			m.focus = focusFiles
-		}
-	case focusDiff:
-		if dir > 0 {
-			m.focus = focusFiles
-		} else {
-			if hasCommits {
-				m.focus = focusCommits
-			} else {
-				m.focus = focusFiles
-			}
+	// Build ordered list of available focus areas.
+	areas := []focusArea{focusFiles}
+	if hasCommitMsg {
+		areas = append(areas, focusCommitMsg)
+	}
+	if hasCommits {
+		areas = append(areas, focusCommits)
+	}
+	if hasFiles {
+		areas = append(areas, focusDiff)
+	}
+	if len(areas) <= 1 {
+		return
+	}
+
+	cur := 0
+	for i, a := range areas {
+		if a == m.focus {
+			cur = i
+			break
 		}
 	}
+	next := (cur + dir + len(areas)) % len(areas)
+	m.focus = areas[next]
 }
 
 func (m *model) keyDown() tea.Cmd {
@@ -501,11 +699,21 @@ func (m model) handleMouseLeft(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 func (m model) handleMouseClick(msg tea.MouseMsg, borderX int) (tea.Model, tea.Cmd) {
 	if msg.X > borderX {
 		m.focus = focusDiff
+		// Click in diff area — stage the clicked hunk.
+		if cmd := m.stageHunkAtY(msg.Y); cmd != nil {
+			return m, cmd
+		}
 		return m, nil
 	}
 
-	_, commitStart := m.sidebarSplit()
+	fileH, msgH, _ := m.sidebarSplit()
 	row := msg.Y - headerHeight
+	commitStart := fileH + msgH
+
+	if msgH > 0 && row >= fileH && row < commitStart {
+		m.focus = focusCommitMsg
+		return m, m.commitMsg.Focus()
+	}
 
 	if row >= commitStart {
 		return m.handleCommitClick(row, commitStart)
@@ -516,6 +724,13 @@ func (m model) handleMouseClick(msg tea.MouseMsg, borderX int) (tea.Model, tea.C
 	if treeRow >= 0 && treeRow < len(m.tree) {
 		entry := m.tree[treeRow]
 		if entry.fileIdx >= 0 {
+			// Click on status indicator (right side) toggles staging.
+			if msg.X >= m.sidebarWidth-5 {
+				if cmd := m.stageFileAt(entry.fileIdx); cmd != nil {
+					return m, cmd
+				}
+				return m, nil
+			}
 			m.setCursor(entry.fileIdx)
 			m.focus = focusDiff
 		}
@@ -537,7 +752,8 @@ func (m model) handleCommitClick(row, commitStart int) (tea.Model, tea.Cmd) {
 
 func (m *model) handleMouseScroll(msg tea.MouseMsg, dir int) tea.Cmd {
 	borderX := m.sidebarBorderX()
-	_, commitStart := m.sidebarSplit()
+	fileH, msgH, _ := m.sidebarSplit()
+	commitStart := fileH + msgH
 
 	if msg.X > borderX {
 		if dir > 0 {
@@ -590,16 +806,19 @@ func (m model) branchHeaderRows() int {
 	return 0
 }
 
-// sidebarSplit returns (fileTreeHeight, commitListStartRow).
-// commitListStartRow is relative to the main area top.
-func (m model) sidebarSplit() (int, int) {
+// sidebarSplit returns (fileTreeHeight, commitMsgHeight, commitListHeight).
+func (m model) sidebarSplit() (int, int, int) {
 	mainH := m.mainHeight()
 	commitH := m.commitListHeight()
-	fileH := mainH - commitH
+	var msgH int
+	if m.commitMsgVisible() {
+		msgH = 4 // label + 3 input lines
+	}
+	fileH := mainH - commitH - msgH
 	if fileH < 1 {
 		fileH = 1
 	}
-	return fileH, fileH
+	return fileH, msgH, commitH
 }
 
 func (m model) commitListHeight() int {
@@ -618,7 +837,7 @@ func (m model) View() string {
 
 	mainH := m.mainHeight()
 
-	fileH, _ := m.sidebarSplit()
+	fileH, _, _ := m.sidebarSplit()
 
 	// Keep cursor's tree row visible in file tree scroll region.
 	cursorRow := m.cursorTreeRow()

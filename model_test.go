@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -25,6 +26,7 @@ func testModel(files []FileDiff) model {
 		sha:            "abc1234",
 		message:        "test commit",
 		selectedCommit: -1,
+		commitMsg:      textarea.New(),
 	}
 	content := m.buildDiffContent()
 	m.viewport.SetContent(content)
@@ -367,8 +369,8 @@ func TestRenderStatus_FocusHints(t *testing.T) {
 
 	m.focus = focusFiles
 	status := m.renderStatus()
-	if !strings.Contains(status, "enter: open") {
-		t.Error("file-focused status should show file hints")
+	if !strings.Contains(status, "s: stage") {
+		t.Error("file-focused status should show stage hint")
 	}
 
 	m.focus = focusCommits
@@ -379,8 +381,8 @@ func TestRenderStatus_FocusHints(t *testing.T) {
 
 	m.focus = focusDiff
 	status = m.renderStatus()
-	if !strings.Contains(status, "tab: files") {
-		t.Error("diff-focused status should show diff hints")
+	if !strings.Contains(status, "s: stage hunk") {
+		t.Error("diff-focused status should show hunk stage hint")
 	}
 }
 
@@ -429,7 +431,7 @@ func TestRenderDiffLine_AllTypes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := renderDiffLine(tt.dl, 3, highlightedLine{})
+			result := renderDiffLine(tt.dl, 3, highlightedLine{}, "")
 			if !strings.Contains(result, tt.want) {
 				t.Errorf("renderDiffLine(%s) = %q, should contain %q", tt.name, result, tt.want)
 			}

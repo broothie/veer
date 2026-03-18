@@ -113,6 +113,7 @@ func (m *model) buildDiffContent() string {
 		vpWidth := m.vpWidth()
 		vpHeight := m.mainHeight()
 		m.fileOffsets = nil
+		m.hunkRefs = nil
 		return lipgloss.NewStyle().
 			Width(vpWidth).
 			Height(vpHeight).
@@ -122,6 +123,7 @@ func (m *model) buildDiffContent() string {
 
 	var sb strings.Builder
 	m.fileOffsets = make([]int, len(m.files))
+	m.hunkRefs = nil
 	lineNum := 0
 
 	for i, f := range m.files {
@@ -134,6 +136,7 @@ func (m *model) buildDiffContent() string {
 		// File path header — full-width bar with delta and status.
 		if i > 0 {
 			sb.WriteByte('\n')
+			m.hunkRefs = append(m.hunkRefs, hunkRef{i, -1})
 			lineNum++
 		}
 		vpWidth := m.vpWidth()
@@ -154,6 +157,7 @@ func (m *model) buildDiffContent() string {
 		gap := max(1, vpWidth-lipgloss.Width(left)-lipgloss.Width(right))
 		sb.WriteString(styleFilePath.Render(left + strings.Repeat(" ", gap) + right))
 		sb.WriteByte('\n')
+		m.hunkRefs = append(m.hunkRefs, hunkRef{i, -1})
 		lineNum++
 
 		// Determine line number column width for this file.
@@ -167,8 +171,34 @@ func (m *model) buildDiffContent() string {
 		// Batch-highlight all lines for this file.
 		highlighted := highlightFile(f.Path, f.Lines)
 
+		// Track hunk index for this file's lines.
+		hunkIdx := 0
+		seenContent := false
+
 		for j, dl := range f.Lines {
-			sb.WriteString(renderDiffLine(dl, numWidth, highlighted[j]))
+			var section string
+			switch dl.Type {
+			case LineHeader:
+				if seenContent {
+					hunkIdx++
+				}
+				m.hunkRefs = append(m.hunkRefs, hunkRef{i, -1})
+			case LineSeparator:
+				hunkIdx++
+				m.hunkRefs = append(m.hunkRefs, hunkRef{i, -1})
+				// Use section of the next hunk for the separator line.
+				if hunkIdx < len(f.Hunks) {
+					section = f.Hunks[hunkIdx].Section
+				}
+			default:
+				seenContent = true
+				m.hunkRefs = append(m.hunkRefs, hunkRef{i, hunkIdx})
+				if hunkIdx < len(f.Hunks) {
+					section = f.Hunks[hunkIdx].Section
+				}
+			}
+
+			sb.WriteString(renderDiffLine(dl, numWidth, highlighted[j], section))
 			sb.WriteByte('\n')
 			lineNum++
 		}
@@ -177,19 +207,29 @@ func (m *model) buildDiffContent() string {
 	return sb.String()
 }
 
-func renderDiffLine(dl DiffLine, numWidth int, hl highlightedLine) string {
+func renderDiffLine(dl DiffLine, numWidth int, hl highlightedLine, section string) string {
+	// Gutter staging indicator: S (staged) or M (unstaged).
+	var indicator string
+	switch section {
+	case "staged":
+		indicator = styleStaged.Inherit(styleGutter).Render("S")
+	case "unstaged":
+		indicator = styleSHA.Inherit(styleGutter).Render("M")
+	default:
+		indicator = styleGutter.Render(" ")
+	}
+
 	switch dl.Type {
 	case LineSeparator:
-		return styleGutter.Render(fmt.Sprintf(" %*s   ", numWidth, "…"))
+		return indicator + styleGutter.Render(fmt.Sprintf(" %*s   ", numWidth, "…"))
 	case LineContext:
-		return styleGutter.Render(fmt.Sprintf(" %*d   ", numWidth, dl.NewNum)) + renderHighlighted(hl, dl.Content)
+		return indicator + styleGutter.Render(fmt.Sprintf(" %*d   ", numWidth, dl.NewNum)) + renderHighlighted(hl, dl.Content)
 	case LineAdded:
-		return styleGutter.Render(fmt.Sprintf(" %*d + ", numWidth, dl.NewNum)) + renderHighlightedWithBG(hl, dl.Content, lipgloss.Color("22"))
+		return indicator + styleGutter.Render(fmt.Sprintf(" %*d + ", numWidth, dl.NewNum)) + renderHighlightedWithBG(hl, dl.Content, lipgloss.Color("22"))
 	case LineRemoved:
-		return styleGutter.Render(fmt.Sprintf(" %*d - ", numWidth, dl.OldNum)) + renderHighlightedWithBG(hl, dl.Content, lipgloss.Color("52"))
+		return indicator + styleGutter.Render(fmt.Sprintf(" %*d - ", numWidth, dl.OldNum)) + renderHighlightedWithBG(hl, dl.Content, lipgloss.Color("52"))
 	case LineHeader:
-		pad := strings.Repeat("─", numWidth+3)
-		return styleHeader.Render(fmt.Sprintf(" %s %s ", pad, dl.Content))
+		return styleGutter.Render(fmt.Sprintf("  %*s   ", numWidth, "…"))
 	default:
 		return ""
 	}
@@ -203,11 +243,18 @@ func (m model) renderStatus() string {
 	var hint string
 	switch m.focus {
 	case focusFiles:
-		hint = "enter: open  tab: commits  q: quit"
+		parts := []string{"s: stage", "enter: open", "tab: next", "q: quit"}
+		if m.hasStaged() {
+			parts = append([]string{"u: unstage all", "c: commit"}, parts...)
+		}
+		hint = strings.Join(parts, "  ")
+	case focusCommitMsg:
+		hint = "^d: commit  esc: cancel  tab: next"
 	case focusCommits:
-		hint = "enter: select  tab: diff  shift+tab: files  q: quit"
+		hint = "enter: select  tab: next  q: quit"
 	case focusDiff:
-		hint = "tab: files  j/k ↑↓  ^f/^b: page  q: quit"
+		parts := []string{"s: stage hunk", "tab: files", "j/k ↑↓  ^f/^b: page", "q: quit"}
+		hint = strings.Join(parts, "  ")
 	}
 
 	return styleBar.Width(m.width).Render(styleBar.Render(" " + hint))
