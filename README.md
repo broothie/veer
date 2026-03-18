@@ -70,5 +70,6 @@ veer -t monokai         # use monokai syntax theme (default dracula)
 - [ ] Flesh out tests
 - [ ] Run go vet in CI
 - [ ] Add GitHub info (issues, discussions, etc.)
+- [ ] Show focus indicator in footer
 - [x] Set up goreleaser
 - [x] Syntax highlighting
