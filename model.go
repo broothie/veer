@@ -13,6 +13,7 @@ import (
 
 const (
 	sidebarWidth    = 30
+	sidebarPad      = 1
 	refreshInterval = 500 * time.Millisecond
 	headerHeight    = 2 // header line + blank line
 	statusHeight    = 2 // blank line + status line
@@ -23,6 +24,7 @@ var (
 	styleRem     = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
 	styleAddLine = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Background(lipgloss.Color("22"))
 	styleRemLine = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Background(lipgloss.Color("52"))
+	styleGutter  = lipgloss.NewStyle().Background(lipgloss.Color("237"))
 	styleFaint   = lipgloss.NewStyle().Faint(true)
 	styleBold   = lipgloss.NewStyle().Bold(true)
 	styleActive = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("2"))
@@ -32,8 +34,9 @@ var (
 
 	styleSidebar = lipgloss.NewStyle().
 			BorderRight(true).
-			BorderStyle(lipgloss.NormalBorder()).
-			BorderForeground(lipgloss.Color("240"))
+			BorderStyle(lipgloss.BlockBorder()).
+			BorderForeground(lipgloss.Color("237")).
+			PaddingRight(sidebarPad)
 )
 
 // treeEntry is a row in the sidebar: either a directory header or a file.
@@ -100,7 +103,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		vpWidth := max(1, m.width-sidebarWidth-1)
+		vpWidth := max(1, m.width-sidebarWidth-sidebarPad-1)
 		vpHeight := m.mainHeight()
 		m.viewport = viewport.New(vpWidth, vpHeight)
 		m.viewport.SetContent(m.buildDiffContent())
@@ -240,7 +243,7 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	inSidebar := msg.X <= sidebarWidth
+	inSidebar := msg.X <= sidebarWidth+sidebarPad
 
 	switch msg.Button {
 	case tea.MouseButtonLeft:
@@ -321,16 +324,21 @@ func (m model) buildDiffContent() string {
 }
 
 func renderDiffLine(dl DiffLine, numWidth int) string {
+	// gutterWidth is: space + number + space + marker + space
+	// e.g. " 123 + " or " 123   "
 	switch dl.Type {
 	case LineSeparator:
-		return styleFaint.Render(fmt.Sprintf("%*s …", numWidth, ""))
+		gutter := styleGutter.Render(fmt.Sprintf(" %*s   ", numWidth, "…"))
+		return gutter
 	case LineContext:
-		num := styleFaint.Render(fmt.Sprintf("%*d", numWidth, dl.NewNum))
-		return num + "   " + dl.Content
+		gutter := styleGutter.Render(fmt.Sprintf(" %*d   ", numWidth, dl.NewNum))
+		return gutter + dl.Content
 	case LineAdded:
-		return styleAddLine.Render(fmt.Sprintf("%*d + %s", numWidth, dl.NewNum, dl.Content))
+		gutter := styleGutter.Render(fmt.Sprintf(" %*d + ", numWidth, dl.NewNum))
+		return gutter + styleAddLine.Render(dl.Content)
 	case LineRemoved:
-		return styleRemLine.Render(fmt.Sprintf("%*d - %s", numWidth, dl.OldNum, dl.Content))
+		gutter := styleGutter.Render(fmt.Sprintf(" %*d - ", numWidth, dl.OldNum))
+		return gutter + styleRemLine.Render(dl.Content)
 	default:
 		return ""
 	}
@@ -425,7 +433,7 @@ func (m model) renderSidebar(height int) string {
 	}
 
 	return styleSidebar.
-		Width(sidebarWidth).
+		Width(sidebarWidth + sidebarPad).
 		Height(height).
 		Render(strings.Join(lines, "\n"))
 }

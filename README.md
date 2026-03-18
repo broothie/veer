@@ -7,6 +7,8 @@ A live-diffing TUI for coding with AI.
 - [x] Line numbers
 - [ ] Git history
 - [ ] CLI flags
-- [ ] Thicker sidebars
+- [x] Thicker sidebars
+- [ ] Collapsible sidebar
+- [ ] Scrollbar
 - [ ] Continuous scroll
 - [ ] Refactor everything
