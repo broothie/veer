@@ -2,14 +2,10 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"path/filepath"
 	"sort"
 	"strings"
 
-	"github.com/go-git/go-billy/v5/osfs"
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
 	"github.com/pmezard/go-difflib/difflib"
 )
 
@@ -47,50 +43,37 @@ type FileDiff struct {
 	Removed int
 }
 
-// fetchDiff opens the nearest git repository and returns unstaged diffs
-// along with HEAD metadata.
-func fetchDiff(args []string) (*DiffResult, error) {
-	repo, err := git.PlainOpenWithOptions(".", &git.PlainOpenOptions{DetectDotGit: true})
-	if err != nil {
-		return nil, fmt.Errorf("not a git repository")
-	}
+// HeadInfo holds metadata about the current HEAD.
+type HeadInfo struct {
+	Branch  string
+	SHA     string
+	Message string
+}
 
+// FileChange describes the state of a changed file.
+type FileChange struct {
+	Deleted bool
+}
+
+// Repo abstracts git repository operations needed for diffing.
+type Repo interface {
+	Head() (HeadInfo, error)
+	Status() (map[string]FileChange, error)
+	OldContent(path string) string
+	NewContent(path string) string
+}
+
+// fetchDiff queries the repo and returns unstaged diffs along with HEAD metadata.
+func fetchDiff(repo Repo, args []string) (*DiffResult, error) {
 	result := &DiffResult{}
 
-	// Populate branch / commit info from HEAD.
-	if ref, err := repo.Head(); err == nil {
-		result.Branch = ref.Name().Short()
-		hash := ref.Hash().String()
-		if len(hash) > 7 {
-			hash = hash[:7]
-		}
-		result.SHA = hash
-
-		if commit, err := repo.CommitObject(ref.Hash()); err == nil {
-			msg := strings.TrimSpace(commit.Message)
-			if idx := strings.IndexByte(msg, '\n'); idx != -1 {
-				msg = msg[:idx]
-			}
-			result.Message = msg
-		}
+	if head, err := repo.Head(); err == nil {
+		result.Branch = head.Branch
+		result.SHA = head.SHA
+		result.Message = head.Message
 	}
 
-	wt, err := repo.Worktree()
-	if err != nil {
-		return result, err
-	}
-
-	// Load global and system gitignore patterns — go-git doesn't do this automatically.
-	// These functions expect a filesystem rooted at /, not the worktree.
-	rootFS := osfs.New("/")
-	if global, err := gitignore.LoadGlobalPatterns(rootFS); err == nil {
-		wt.Excludes = append(wt.Excludes, global...)
-	}
-	if system, err := gitignore.LoadSystemPatterns(rootFS); err == nil {
-		wt.Excludes = append(wt.Excludes, system...)
-	}
-
-	status, err := wt.Status()
+	status, err := repo.Status()
 	if err != nil {
 		return result, err
 	}
@@ -98,10 +81,7 @@ func fetchDiff(args []string) (*DiffResult, error) {
 	pathFilters := pathFiltersFrom(args)
 
 	var paths []string
-	for path, fs := range status {
-		if fs.Worktree == git.Unmodified && fs.Staging == git.Unmodified {
-			continue
-		}
+	for path := range status {
 		if !matchesFilters(path, pathFilters) {
 			continue
 		}
@@ -110,18 +90,13 @@ func fetchDiff(args []string) (*DiffResult, error) {
 	sort.Strings(paths)
 
 	for _, path := range paths {
-		fs := status[path]
+		fc := status[path]
 
-		old, err := indexedContent(repo, path)
-		if err != nil {
-			old = headContent(repo, path)
-		}
+		old := repo.OldContent(path)
 
 		var new string
-		if fs.Worktree != git.Deleted {
-			if data, err := readFromFS(wt, path); err == nil {
-				new = string(data)
-			}
+		if !fc.Deleted {
+			new = repo.NewContent(path)
 		}
 
 		lines, added, removed, err := buildDiffLines(path, old, new)
@@ -215,63 +190,6 @@ func parseUnifiedDiff(rawLines []string) ([]DiffLine, int, int, error) {
 	}
 
 	return lines, added, removed, nil
-}
-
-// indexedContent reads a file's content from the git index (staging area).
-func indexedContent(repo *git.Repository, path string) (string, error) {
-	idx, err := repo.Storer.Index()
-	if err != nil {
-		return "", err
-	}
-	for _, entry := range idx.Entries {
-		if entry.Name != path {
-			continue
-		}
-		blob, err := repo.BlobObject(entry.Hash)
-		if err != nil {
-			return "", err
-		}
-		r, err := blob.Reader()
-		if err != nil {
-			return "", err
-		}
-		defer r.Close()
-		b, err := io.ReadAll(r)
-		return string(b), err
-	}
-	return "", fmt.Errorf("not in index: %s", path)
-}
-
-// headContent reads a file's content from HEAD, returning "" on any error.
-func headContent(repo *git.Repository, path string) string {
-	ref, err := repo.Head()
-	if err != nil {
-		return ""
-	}
-	commit, err := repo.CommitObject(ref.Hash())
-	if err != nil {
-		return ""
-	}
-	tree, err := commit.Tree()
-	if err != nil {
-		return ""
-	}
-	f, err := tree.File(path)
-	if err != nil {
-		return ""
-	}
-	content, _ := f.Contents()
-	return content
-}
-
-// readFromFS reads a file from the worktree filesystem.
-func readFromFS(wt *git.Worktree, path string) ([]byte, error) {
-	f, err := wt.Filesystem.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	return io.ReadAll(f)
 }
 
 // pathFiltersFrom extracts path args (non-flags, post "--") from args.

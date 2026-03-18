@@ -88,7 +88,11 @@ func tickCmd() tea.Cmd {
 
 func fetchCmd(args []string) tea.Cmd {
 	return func() tea.Msg {
-		result, err := fetchDiff(args)
+		repo, err := openRepo()
+		if err != nil {
+			return diffResultMsg{nil, err}
+		}
+		result, err := fetchDiff(repo, args)
 		return diffResultMsg{result, err}
 	}
 }
