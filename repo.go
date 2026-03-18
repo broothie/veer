@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"sort"
 	"strings"
 
+	"github.com/broothie/cob"
 	"github.com/go-git/go-billy/v5/osfs"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -84,26 +87,45 @@ func (g *gitRepo) Head() (HeadInfo, error) {
 }
 
 func (g *gitRepo) Status() (map[string]FileChange, error) {
-	debugf("Status: computing")
-	status, err := g.wt.Status()
+	debugf("Status: computing via git status --porcelain")
+	root := g.wt.Filesystem.Root()
+	stdout, _, _, err := cob.Output(context.Background(), "git",
+		cob.SetDir(root),
+		cob.AddArgs("status", "--porcelain"),
+	)
 	if err != nil {
 		debugf("Status: failed: %v", err)
 		return nil, err
 	}
 
 	changes := make(map[string]FileChange)
-	for path, fs := range status {
-		if fs.Worktree == git.Unmodified && fs.Staging == git.Unmodified {
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if len(line) < 4 {
+			continue
+		}
+		x, y := line[0], line[1] // x=staging, y=worktree
+		path := line[3:]
+
+		// Porcelain v1 renames: "R  old -> new" — use the destination path.
+		if x == 'R' || x == 'C' {
+			if idx := strings.LastIndex(path, " -> "); idx >= 0 {
+				path = path[idx+4:]
+			}
+		}
+
+		// Skip ignored files.
+		if x == '!' && y == '!' {
 			continue
 		}
 
 		fc := FileChange{
-			Staged:          fs.Staging != git.Unmodified && fs.Staging != git.Untracked,
-			Unstaged:        fs.Worktree != git.Unmodified,
-			StagingDeleted:  fs.Staging == git.Deleted,
-			WorktreeDeleted: fs.Worktree == git.Deleted,
+			Staged:          x != ' ' && x != '?',
+			Unstaged:        y != ' ' || (x == '?' && y == '?'), // untracked = both '?'
+			StagingDeleted:  x == 'D',
+			WorktreeDeleted: y == 'D',
 		}
-
 		changes[path] = fc
 	}
 	debugf("Status: %d changed files", len(changes))
