@@ -14,8 +14,8 @@ import (
 const (
 	sidebarWidth    = 30
 	refreshInterval = 500 * time.Millisecond
-	headerHeight    = 1
-	statusHeight    = 1
+	headerHeight    = 2 // header line + blank line
+	statusHeight    = 2 // blank line + status line
 )
 
 var (
@@ -344,6 +344,9 @@ func (m model) View() string {
 func (m model) renderHeader() string {
 	var parts []string
 
+	if m.cwd != "" {
+		parts = append(parts, styleFaint.Render(m.cwd))
+	}
 	if m.branch != "" {
 		parts = append(parts, styleBranch.Render(m.branch))
 	}
@@ -353,29 +356,25 @@ func (m model) renderHeader() string {
 	if m.message != "" {
 		parts = append(parts, m.message)
 	}
-	if m.cwd != "" {
-		parts = append(parts, styleFaint.Render(m.cwd))
-	}
 
 	line := strings.Join(parts, styleFaint.Render(" · "))
 
-	// Truncate to terminal width.
+	// Truncate to terminal width — drop message first.
 	if lipgloss.Width(line) > m.width {
-		// Rough truncation — rebuild without message or shorten it.
 		var short []string
+		if m.cwd != "" {
+			short = append(short, styleFaint.Render(m.cwd))
+		}
 		if m.branch != "" {
 			short = append(short, styleBranch.Render(m.branch))
 		}
 		if m.sha != "" {
 			short = append(short, styleSHA.Render(m.sha))
 		}
-		if m.cwd != "" {
-			short = append(short, styleFaint.Render(m.cwd))
-		}
 		line = strings.Join(short, styleFaint.Render(" · "))
 	}
 
-	return " " + line
+	return " " + line + "\n"
 }
 
 func (m model) renderSidebar(height int) string {
@@ -477,7 +476,7 @@ func (m model) renderStatus() string {
 		parts = append(parts, "h/tab: files  j/k ↑↓  ^d/^u  q: quit")
 	}
 
-	return styleFaint.Render(" " + strings.Join(parts, "  ·  "))
+	return "\n" + styleFaint.Render(" "+strings.Join(parts, "  ·  "))
 }
 
 // --- Tree building ---
