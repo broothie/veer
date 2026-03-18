@@ -1,12 +1,21 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/lexers"
+	"github.com/alecthomas/chroma/v2/styles"
 	"github.com/charmbracelet/lipgloss"
 )
+
+// theme holds the resolved chroma style for syntax highlighting.
+var theme *chroma.Style
+
+func initTheme(name string) {
+	theme = styles.Get(name)
+}
 
 // highlightedLine holds pre-tokenized syntax data for a single line.
 type highlightedLine struct {
@@ -25,13 +34,12 @@ func highlightFile(filename string, lines []DiffLine) []highlightedLine {
 	}
 	lexer = chroma.Coalesce(lexer)
 
-	// Build full text from all content lines, tracking which diff line each belongs to.
+	// Build full text from all content lines.
 	var fullText strings.Builder
-	for i, dl := range lines {
+	for _, dl := range lines {
 		if dl.Type == LineSeparator || dl.Type == LineHeader {
 			continue
 		}
-		_ = i
 		fullText.WriteString(dl.Content)
 		fullText.WriteByte('\n')
 	}
@@ -43,7 +51,6 @@ func highlightFile(filename string, lines []DiffLine) []highlightedLine {
 
 	// Map tokens back to diff lines.
 	lineIdx := 0
-	// Skip to first content line.
 	for lineIdx < len(lines) && (lines[lineIdx].Type == LineSeparator || lines[lineIdx].Type == LineHeader) {
 		lineIdx++
 	}
@@ -53,11 +60,9 @@ func highlightFile(filename string, lines []DiffLine) []highlightedLine {
 			break
 		}
 
-		// Split tokens that span newlines.
 		parts := strings.Split(tok.Value, "\n")
 		for pi, part := range parts {
 			if pi > 0 {
-				// Advance to next content line.
 				lineIdx++
 				for lineIdx < len(lines) && (lines[lineIdx].Type == LineSeparator || lines[lineIdx].Type == LineHeader) {
 					lineIdx++
@@ -114,53 +119,40 @@ func renderHighlightedWithBG(hl highlightedLine, content string, bg lipgloss.Col
 	return sb.String()
 }
 
-// tokenStyle maps chroma token types to lipgloss styles.
+// tokenStyle resolves a chroma token type to a lipgloss style using the active theme.
 func tokenStyle(t chroma.TokenType) *lipgloss.Style {
-	s, ok := tokenStyles[t]
-	if ok {
-		return &s
+	if theme == nil {
+		return nil
 	}
-	// Walk up the token type hierarchy.
-	parent := t.Parent()
-	if parent != t {
-		return tokenStyle(parent)
+	entry := theme.Get(t)
+	if entry.IsZero() {
+		return nil
 	}
-	return nil
+	s := lipgloss.NewStyle()
+	hasStyle := false
+	if entry.Colour.IsSet() {
+		s = s.Foreground(lipgloss.Color(chromaToHex(entry.Colour)))
+		hasStyle = true
+	}
+	if entry.Bold == chroma.Yes {
+		s = s.Bold(true)
+		hasStyle = true
+	}
+	if entry.Italic == chroma.Yes {
+		s = s.Italic(true)
+		hasStyle = true
+	}
+	if entry.Underline == chroma.Yes {
+		s = s.Underline(true)
+		hasStyle = true
+	}
+	if !hasStyle {
+		return nil
+	}
+	return &s
 }
 
-var tokenStyles = map[chroma.TokenType]lipgloss.Style{
-	// Keywords
-	chroma.Keyword:            lipgloss.NewStyle().Foreground(lipgloss.Color("5")), // magenta
-	chroma.KeywordConstant:    lipgloss.NewStyle().Foreground(lipgloss.Color("5")), // magenta
-	chroma.KeywordDeclaration: lipgloss.NewStyle().Foreground(lipgloss.Color("5")), // magenta
-	chroma.KeywordType:        lipgloss.NewStyle().Foreground(lipgloss.Color("6")), // cyan
-	chroma.KeywordNamespace:   lipgloss.NewStyle().Foreground(lipgloss.Color("5")), // magenta
-	chroma.KeywordReserved:    lipgloss.NewStyle().Foreground(lipgloss.Color("5")), // magenta
-	chroma.KeywordPseudo:      lipgloss.NewStyle().Foreground(lipgloss.Color("5")), // magenta
-
-	// Names
-	chroma.NameBuiltin:   lipgloss.NewStyle().Foreground(lipgloss.Color("6")), // cyan
-	chroma.NameFunction:  lipgloss.NewStyle().Foreground(lipgloss.Color("4")), // blue
-	chroma.NameClass:     lipgloss.NewStyle().Foreground(lipgloss.Color("6")), // cyan
-	chroma.NameDecorator: lipgloss.NewStyle().Foreground(lipgloss.Color("3")), // yellow
-	chroma.NameException: lipgloss.NewStyle().Foreground(lipgloss.Color("1")), // red
-	chroma.NameTag:       lipgloss.NewStyle().Foreground(lipgloss.Color("4")), // blue
-	chroma.NameAttribute: lipgloss.NewStyle().Foreground(lipgloss.Color("6")), // cyan
-
-	// Literals
-	chroma.LiteralString:         lipgloss.NewStyle().Foreground(lipgloss.Color("2")), // green
-	chroma.LiteralStringEscape:   lipgloss.NewStyle().Foreground(lipgloss.Color("6")), // cyan
-	chroma.LiteralStringInterpol: lipgloss.NewStyle().Foreground(lipgloss.Color("6")), // cyan
-	chroma.LiteralNumber:         lipgloss.NewStyle().Foreground(lipgloss.Color("3")), // yellow
-	chroma.LiteralStringChar:     lipgloss.NewStyle().Foreground(lipgloss.Color("2")), // green
-
-	// Comments
-	chroma.Comment:          lipgloss.NewStyle().Foreground(lipgloss.Color("8")), // bright black (gray)
-	chroma.CommentSingle:    lipgloss.NewStyle().Foreground(lipgloss.Color("8")),
-	chroma.CommentMultiline: lipgloss.NewStyle().Foreground(lipgloss.Color("8")),
-
-	// Operators
-	chroma.Operator:     lipgloss.NewStyle().Foreground(lipgloss.Color("5")), // magenta
-	chroma.OperatorWord: lipgloss.NewStyle().Foreground(lipgloss.Color("5")),
-	chroma.Punctuation:  lipgloss.NewStyle().Foreground(lipgloss.Color("7")), // white
+// chromaToHex converts a chroma Colour to a hex string for lipgloss.
+func chromaToHex(c chroma.Colour) string {
+	return fmt.Sprintf("#%02x%02x%02x", c.Red(), c.Green(), c.Blue())
 }
