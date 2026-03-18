@@ -968,5 +968,5 @@ func (m model) View() string {
 	main := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, sidebarScrollbar, border, content, diffScrollbar)
 	status := m.renderStatus()
 
-	return header + "\n" + main + "\n" + status
+	return lipgloss.JoinVertical(lipgloss.Left, header, main, status)
 }
