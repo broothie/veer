@@ -1,5 +1,9 @@
 # veer
 
+[![Go Report Card](https://goreportcard.com/badge/github.com/broothie/veer)](https://goreportcard.com/report/github.com/broothie/veer)
+[![codecov](https://codecov.io/gh/broothie/veer/branch/main/graph/badge.svg)](https://codecov.io/gh/broothie/veer)
+[![gosec](https://github.com/broothie/veer/actions/workflows/gosec.yml/badge.svg)](https://github.com/broothie/veer/actions/workflows/gosec.yml)
+
 A live-diffing TUI for coding with AI.
 
 Veer watches your working tree for changes and displays a live, color-coded diff in a fullscreen terminal interface. It's designed to run alongside an AI coding session so you can see exactly what's being changed as it happens.
