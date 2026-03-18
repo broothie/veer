@@ -2,7 +2,7 @@
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/broothie/veer)](https://goreportcard.com/report/github.com/broothie/veer)
 [![codecov](https://codecov.io/gh/broothie/veer/branch/main/graph/badge.svg)](https://codecov.io/gh/broothie/veer)
-[![gosec](https://github.com/broothie/veer/actions/workflows/gosec.yml/badge.svg)](https://github.com/broothie/veer/actions/workflows/gosec.yml)
+[![gosec](https://github.com/broothie/veer/actions/workflows/ci.yml/badge.svg)](https://github.com/broothie/veer/actions/workflows/ci.yml)
 
 A live-diffing TUI for coding with AI.
 
