@@ -47,21 +47,6 @@ veer -n 1s              # refresh every 1 second
 veer -w 40              # initial sidebar width of 40 (default 35)
 ```
 
-## Keybindings
-
-| Key | Sidebar | Diff |
-|-----|---------|------|
-| `j` / `k` | navigate files | scroll |
-| `enter` / `l` | open diff | — |
-| `h` | — | back to sidebar |
-| `tab` | switch panes | switch panes |
-| `g` / `G` | first / last file | top / bottom |
-| `ctrl+d` / `ctrl+u` | — | half-page down / up |
-| `ctrl+f` / `ctrl+b` | — | full-page down / up |
-| `q` | quit | quit |
-
-Mouse: click to select files, scroll wheel to navigate or scroll.
-
 ## TODO
 
 - [x] Line numbers

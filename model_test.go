@@ -151,6 +151,33 @@ func TestHandleKey_Tab_CyclesFocus(t *testing.T) {
 	}
 }
 
+func TestHandleKey_ShiftTab_CyclesBackward(t *testing.T) {
+	m := testModel(twoFiles)
+	m.commits = []CommitInfo{{SHA: "abc1234", FullSHA: "abc1234full", Message: "test"}}
+
+	// diff -> commits
+	m.focus = focusDiff
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = result.(model)
+	if m.focus != focusCommits {
+		t.Errorf("shift+tab from diff: focus = %d, want focusCommits", m.focus)
+	}
+
+	// commits -> files
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = result.(model)
+	if m.focus != focusFiles {
+		t.Errorf("shift+tab from commits: focus = %d, want focusFiles", m.focus)
+	}
+
+	// files -> diff
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = result.(model)
+	if m.focus != focusDiff {
+		t.Errorf("shift+tab from files: focus = %d, want focusDiff", m.focus)
+	}
+}
+
 func TestHandleKey_Tab_SkipsCommitsWhenEmpty(t *testing.T) {
 	m := testModel(twoFiles)
 	m.focus = focusFiles
@@ -187,14 +214,14 @@ func TestHandleKey_Enter_OpensDiff(t *testing.T) {
 	}
 }
 
-func TestHandleKey_H_BackToSidebar(t *testing.T) {
+func TestHandleKey_ShiftTab_DiffToFiles(t *testing.T) {
 	m := testModel(twoFiles)
 	m.focus = focusDiff
 
-	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
 	m = result.(model)
 	if m.focus != focusFiles {
-		t.Error("h should switch focus to files")
+		t.Error("shift+tab from diff (no commits) should switch focus to files")
 	}
 }
 
@@ -352,7 +379,7 @@ func TestRenderStatus_FocusHints(t *testing.T) {
 
 	m.focus = focusDiff
 	status = m.renderStatus()
-	if !strings.Contains(status, "h/tab: files") {
+	if !strings.Contains(status, "tab: files") {
 		t.Error("diff-focused status should show diff hints")
 	}
 }
