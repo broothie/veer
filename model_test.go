@@ -580,6 +580,24 @@ func TestRenderTreeEntry_UnselectedFile(t *testing.T) {
 	}
 }
 
+func TestHandleCommitClick_SelectsClickedCommitRow(t *testing.T) {
+	m := testModel(twoFiles)
+	m.commits = []CommitInfo{
+		{SHA: "abc1234", FullSHA: "abc1234full", Message: "first"},
+		{SHA: "def5678", FullSHA: "def5678full", Message: "second"},
+	}
+	m.commitOffset = 0
+
+	result, _ := m.handleCommitClick(1)
+	got := result.(model)
+	if got.commitCursor != 1 {
+		t.Fatalf("commitCursor = %d, want 1", got.commitCursor)
+	}
+	if got.selectedCommit != 0 {
+		t.Fatalf("selectedCommit = %d, want 0", got.selectedCommit)
+	}
+}
+
 // --- View ---
 
 func TestView_EmptyWhenNoWidth(t *testing.T) {

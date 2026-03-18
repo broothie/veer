@@ -38,6 +38,7 @@ var (
 	styleFaint    = lipgloss.NewStyle().Faint(true)
 	styleBold     = lipgloss.NewStyle().Bold(true)
 	styleActive   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("2"))
+	styleSelectBG = lipgloss.NewStyle().Background(lipgloss.Color("237"))
 	styleBranch   = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
 	styleSHA      = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
 	styleDir      = lipgloss.NewStyle().Faint(true)
@@ -860,11 +861,7 @@ func (m model) handleMouseClick(msg tea.MouseMsg, borderX int) (tea.Model, tea.C
 }
 
 func (m model) handleCommitClick(row int) (tea.Model, tea.Cmd) {
-	header := m.branchHeaderRows()
-	if row < header {
-		return m, nil
-	}
-	commitRow := m.commitOffset + (row - header)
+	commitRow := m.commitOffset + row
 	total := len(m.commits) + 1
 	if commitRow >= 0 && commitRow < total {
 		m.commitCursor = commitRow
@@ -919,7 +916,7 @@ func (m *model) handleMouseScroll(msg tea.MouseMsg, dir int) tea.Cmd {
 
 func (m *model) scrollCommitList(dir int) tea.Cmd {
 	total := len(m.commits) + 1
-	commitH := m.commitListHeight() - m.branchHeaderRows()
+	commitH := m.commitListHeight()
 	if dir > 0 {
 		if m.commitCursor < total-1 {
 			m.commitCursor++
@@ -941,13 +938,6 @@ func (m *model) scrollFileTree(dir int) {
 	} else {
 		m.setCursor(m.cursor - 1)
 	}
-}
-
-func (m model) branchHeaderRows() int {
-	if m.branch != "" || m.sha != "" {
-		return 1
-	}
-	return 0
 }
 
 // sidebarSplit returns (fileTreeHeight, commitMsgHeight, commitListHeight).
@@ -981,7 +971,7 @@ func (m model) sidebarSplit() (int, int, int) {
 func (m model) commitListHeight() int {
 	mainH := m.sidebarBodyHeight()
 	total := len(m.commits) + 1 // +1 for working tree entry
-	h := min(total+m.branchHeaderRows(), mainH/3)
+	h := min(total, mainH/3)
 	return max(h, 3) // at least 3 rows
 }
 
@@ -1006,7 +996,7 @@ func (m model) View() string {
 	}
 
 	// Keep commit cursor visible.
-	visibleCommits := commitH - m.branchHeaderRows()
+	visibleCommits := commitH
 	if m.commitCursor < m.commitOffset {
 		m.commitOffset = m.commitCursor
 	} else if m.commitCursor >= m.commitOffset+visibleCommits {
