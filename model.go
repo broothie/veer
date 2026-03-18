@@ -202,7 +202,7 @@ func (m model) mainHeight() int {
 }
 
 func (m model) vpWidth() int {
-	return max(1, m.width-m.sidebarWidth-sidebarPad-1-1) // -1 border, -1 scrollbar
+	return max(1, m.width-m.sidebarWidth-sidebarPad-3) // -1 sidebar scrollbar, -1 border, -1 diff scrollbar
 }
 
 func (m *model) recalcLayout() {
@@ -653,7 +653,14 @@ func (m model) View() string {
 		sidebarScrollbar = renderScrollbar(mainH, len(m.tree), m.sidebarOffset)
 	}
 
-	main := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, sidebarScrollbar, content, diffScrollbar)
+	border := renderBorder(mainH)
+	if sidebarScrollbar == "" {
+		sidebarScrollbar = renderEmptyColumn(mainH)
+	}
+	if diffScrollbar == "" {
+		diffScrollbar = renderEmptyColumn(mainH)
+	}
+	main := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, sidebarScrollbar, border, content, diffScrollbar)
 	status := m.renderStatus()
 
 	return lipgloss.JoinVertical(lipgloss.Left, header, main, status)

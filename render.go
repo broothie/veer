@@ -19,17 +19,10 @@ const (
 )
 
 // renderScrollbar renders a vertical scrollbar column of the given height.
-// Always returns a column; renders a plain track when all content is visible.
+// Returns empty string if all content is visible.
 func renderScrollbar(height, total, offset int) string {
 	if total <= height {
-		var sb strings.Builder
-		for i := range height {
-			if i > 0 {
-				sb.WriteByte('\n')
-			}
-			sb.WriteString(styleScrollTrack.Render(scrollTrackChar))
-		}
-		return sb.String()
+		return ""
 	}
 
 	thumbSize := max(1, height*height/total)
@@ -50,6 +43,30 @@ func renderScrollbar(height, total, offset int) string {
 	return sb.String()
 }
 
+// renderEmptyColumn renders a 1-char-wide column of spaces to fill reserved layout space.
+func renderEmptyColumn(height int) string {
+	var sb strings.Builder
+	for i := range height {
+		if i > 0 {
+			sb.WriteByte('\n')
+		}
+		sb.WriteByte(' ')
+	}
+	return sb.String()
+}
+
+// renderBorder renders a thin vertical border column of the given height.
+func renderBorder(height int) string {
+	var sb strings.Builder
+	for i := range height {
+		if i > 0 {
+			sb.WriteByte('\n')
+		}
+		sb.WriteString(styleFaint.Render("│"))
+	}
+	return sb.String()
+}
+
 func (m model) renderHeader() string {
 	sep := " · "
 
@@ -58,18 +75,26 @@ func (m model) renderHeader() string {
 		parts = append(parts, m.cwd)
 	}
 	if m.sha != "" {
-		parts = append(parts, styleSHA.Render(m.sha))
+		parts = append(parts, styleSHA.Inherit(styleBar).Render(m.sha))
+	}
+	if len(m.files) > 0 {
+		totalAdd, totalRem := 0, 0
+		for _, f := range m.files {
+			totalAdd += f.Added
+			totalRem += f.Removed
+		}
+		delta := styleAdd.Inherit(styleBar).Render(fmt.Sprintf("+%d", totalAdd)) +
+			styleBar.Render(" ") +
+			styleRem.Inherit(styleBar).Render(fmt.Sprintf("-%d", totalRem))
+		parts = append(parts, delta)
 	}
 
-	line := strings.Join(parts, sep)
+	line := strings.Join(parts, styleBar.Render(sep))
 
 	// Append commit message, truncating if needed.
 	// Render with explicit bar background to prevent SHA style reset from clearing it.
 	if m.message != "" {
-		sepStr := ""
-		if len(parts) > 0 {
-			sepStr = sep
-		}
+		sepStr := sep
 		avail := m.width - lipgloss.Width(line) - lipgloss.Width(sepStr) - 1 // 1 for leading space
 		if avail > 3 {
 			msg := m.message
@@ -85,7 +110,7 @@ func (m model) renderHeader() string {
 
 func (m *model) buildDiffContent() string {
 	if len(m.files) == 0 {
-		vpWidth := max(1, m.width-m.sidebarWidth-sidebarPad-1-1) // -1 for scrollbar
+		vpWidth := m.vpWidth()
 		vpHeight := m.mainHeight()
 		m.fileOffsets = nil
 		return lipgloss.NewStyle().
@@ -111,7 +136,7 @@ func (m *model) buildDiffContent() string {
 			sb.WriteByte('\n')
 			lineNum++
 		}
-		vpWidth := max(1, m.width-m.sidebarWidth-sidebarPad-1-1)
+		vpWidth := m.vpWidth()
 
 		left := " " + f.Path
 
@@ -172,26 +197,15 @@ func (m model) renderStatus() string {
 		return styleBar.Width(m.width).Render(" error: " + m.err.Error())
 	}
 
-	var parts []string
-	if len(m.files) > 0 {
-		totalAdd, totalRem := 0, 0
-		for _, f := range m.files {
-			totalAdd += f.Added
-			totalRem += f.Removed
-		}
-		parts = append(parts, fmt.Sprintf("%d files", len(m.files)))
-		parts = append(parts, styleAdd.Render(fmt.Sprintf("+%d", totalAdd))+" "+styleRem.Render(fmt.Sprintf("-%d", totalRem)))
-		parts = append(parts, fmt.Sprintf("%d/%d", m.cursor+1, len(m.files)))
-	}
-
+	var hint string
 	switch m.focus {
 	case focusFiles:
-		parts = append(parts, "enter: open  tab: commits  q: quit")
+		hint = "enter: open  tab: commits  q: quit"
 	case focusCommits:
-		parts = append(parts, "enter: select  tab: diff  shift+tab: files  q: quit")
+		hint = "enter: select  tab: diff  shift+tab: files  q: quit"
 	case focusDiff:
-		parts = append(parts, "tab: files  j/k ↑↓  ^f/^b: page  q: quit")
+		hint = "tab: files  j/k ↑↓  ^f/^b: page  q: quit"
 	}
 
-	return styleBar.Width(m.width).Render(" " + strings.Join(parts, "  ·  "))
+	return styleBar.Width(m.width).Render(styleBar.Render(" " + hint))
 }

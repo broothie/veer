@@ -340,15 +340,15 @@ func TestRenderHeader_NoMessage(t *testing.T) {
 
 // --- renderStatus ---
 
-func TestRenderStatus_WithFiles(t *testing.T) {
+func TestRenderHeader_WithFilesDelta(t *testing.T) {
 	m := testModel(twoFiles)
-	status := m.renderStatus()
+	header := m.renderHeader()
 
-	if !strings.Contains(status, "2 files") {
-		t.Error("status should show file count")
+	if !strings.Contains(header, "+2") {
+		t.Error("header should show additions")
 	}
-	if !strings.Contains(status, "1/2") {
-		t.Error("status should show cursor position")
+	if !strings.Contains(header, "-0") {
+		t.Error("header should show removals")
 	}
 }
 
@@ -543,17 +543,15 @@ func TestView_EmptyWhenNoWidth(t *testing.T) {
 
 func TestRenderScrollbar_NoScrollNeeded(t *testing.T) {
 	result := renderScrollbar(20, 10, 0)
-	lines := strings.Split(result, "\n")
-	if len(lines) != 20 {
-		t.Errorf("should return %d-line track column when content fits, got %d", 20, len(lines))
+	if result != "" {
+		t.Error("should return empty when content fits")
 	}
 }
 
 func TestRenderScrollbar_ExactFit(t *testing.T) {
 	result := renderScrollbar(20, 20, 0)
-	lines := strings.Split(result, "\n")
-	if len(lines) != 20 {
-		t.Errorf("should return %d-line track column when content exactly fits, got %d", 20, len(lines))
+	if result != "" {
+		t.Error("should return empty when content exactly fits")
 	}
 }
 
