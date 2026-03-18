@@ -46,6 +46,7 @@ veer -U 5               # 5 lines of context
 veer -n 1s              # refresh every 1 second
 veer -w 40              # initial sidebar width of 40 (default 35)
 veer -t monokai         # use monokai syntax theme (default dracula)
+veer -d                 # enable debug logging to ~/.veer/debug.log
 ```
 
 ## TODO

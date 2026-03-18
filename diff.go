@@ -97,6 +97,8 @@ func fetchDiff(repo Repo, cfg config) (*DiffResult, error) {
 		result.Branch = head.Branch
 		result.SHA = head.SHA
 		result.Message = head.Message
+	} else {
+		debugf("fetchDiff: Head failed: %v", err)
 	}
 
 	// Ref-based diff: compare ref tree vs worktree.
@@ -194,7 +196,10 @@ func fetchRefDiff(repo Repo, cfg config, result *DiffResult) (*DiffResult, error
 	}
 
 	// Also include worktree-modified files (unstaged changes on top of HEAD).
-	status, _ := repo.Status()
+	status, statusErr := repo.Status()
+	if statusErr != nil {
+		debugf("fetchRefDiff: Status failed: %v", statusErr)
+	}
 
 	pathSet := make(map[string]bool)
 	for _, p := range changedPaths {
