@@ -27,7 +27,7 @@ func initDebug(enabled bool) error {
 	}
 
 	path := filepath.Join(dir, "debug.log")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600) // #nosec G304
 	if err != nil {
 		return fmt.Errorf("debug: open log: %w", err)
 	}
