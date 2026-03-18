@@ -13,6 +13,24 @@ import (
 	"github.com/pmezard/go-difflib/difflib"
 )
 
+// LineType classifies a line in a diff.
+type LineType int
+
+const (
+	LineContext   LineType = iota
+	LineAdded
+	LineRemoved
+	LineSeparator
+)
+
+// DiffLine is a single rendered line in a diff, carrying line numbers.
+type DiffLine struct {
+	Type    LineType
+	OldNum  int
+	NewNum  int
+	Content string
+}
+
 // DiffResult holds everything needed to render the UI.
 type DiffResult struct {
 	Branch  string
@@ -21,10 +39,10 @@ type DiffResult struct {
 	Files   []FileDiff
 }
 
-// FileDiff holds the displayable diff lines for a single file.
+// FileDiff holds the structured diff for a single file.
 type FileDiff struct {
 	Path    string
-	Lines   []string
+	Lines   []DiffLine
 	Added   int
 	Removed int
 }
@@ -106,12 +124,11 @@ func fetchDiff(args []string) (*DiffResult, error) {
 			}
 		}
 
-		lines, err := unifiedDiffLines(path, old, new)
+		lines, added, removed, err := buildDiffLines(path, old, new)
 		if err != nil || len(lines) == 0 {
 			continue
 		}
 
-		added, removed := countDeltas(lines)
 		result.Files = append(result.Files, FileDiff{
 			Path:    path,
 			Lines:   lines,
@@ -123,19 +140,81 @@ func fetchDiff(args []string) (*DiffResult, error) {
 	return result, nil
 }
 
-// countDeltas counts added and removed lines, ignoring diff headers.
-func countDeltas(lines []string) (added, removed int) {
-	for _, line := range lines {
+// buildDiffLines computes a unified diff and parses it into structured DiffLines.
+func buildDiffLines(path, old, new string) ([]DiffLine, int, int, error) {
+	ud := difflib.UnifiedDiff{
+		A:        difflib.SplitLines(old),
+		B:        difflib.SplitLines(new),
+		FromFile: "a/" + path,
+		ToFile:   "b/" + path,
+		Context:  3,
+	}
+	text, err := difflib.GetUnifiedDiffString(ud)
+	if err != nil || text == "" {
+		return nil, 0, 0, err
+	}
+	rawLines := strings.Split(strings.TrimRight(text, "\n"), "\n")
+	return parseUnifiedDiff(rawLines)
+}
+
+// parseUnifiedDiff converts raw unified diff lines into structured DiffLines
+// with line numbers and type annotations.
+func parseUnifiedDiff(rawLines []string) ([]DiffLine, int, int, error) {
+	var lines []DiffLine
+	var oldNum, newNum int
+	added, removed := 0, 0
+	firstHunk := true
+
+	for _, raw := range rawLines {
 		switch {
-		case strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "---"):
-			// skip diff headers
-		case strings.HasPrefix(line, "+"):
+		case strings.HasPrefix(raw, "---"), strings.HasPrefix(raw, "+++"):
+			// skip file headers
+
+		case strings.HasPrefix(raw, "@@"):
+			if !firstHunk {
+				lines = append(lines, DiffLine{Type: LineSeparator})
+			}
+			firstHunk = false
+			var os, oc, ns, nc int
+			fmt.Sscanf(raw, "@@ -%d,%d +%d,%d @@", &os, &oc, &ns, &nc)
+			oldNum = os
+			newNum = ns
+
+		case strings.HasPrefix(raw, "+"):
+			lines = append(lines, DiffLine{
+				Type:    LineAdded,
+				NewNum:  newNum,
+				Content: raw[1:],
+			})
+			newNum++
 			added++
-		case strings.HasPrefix(line, "-"):
+
+		case strings.HasPrefix(raw, "-"):
+			lines = append(lines, DiffLine{
+				Type:    LineRemoved,
+				OldNum:  oldNum,
+				Content: raw[1:],
+			})
+			oldNum++
 			removed++
+
+		default:
+			content := raw
+			if len(raw) > 0 && raw[0] == ' ' {
+				content = raw[1:]
+			}
+			lines = append(lines, DiffLine{
+				Type:    LineContext,
+				OldNum:  oldNum,
+				NewNum:  newNum,
+				Content: content,
+			})
+			oldNum++
+			newNum++
 		}
 	}
-	return
+
+	return lines, added, removed, nil
 }
 
 // indexedContent reads a file's content from the git index (staging area).
@@ -193,22 +272,6 @@ func readFromFS(wt *git.Worktree, path string) ([]byte, error) {
 	}
 	defer f.Close()
 	return io.ReadAll(f)
-}
-
-// unifiedDiffLines produces diff lines in unified format.
-func unifiedDiffLines(path, old, new string) ([]string, error) {
-	ud := difflib.UnifiedDiff{
-		A:        difflib.SplitLines(old),
-		B:        difflib.SplitLines(new),
-		FromFile: "a/" + path,
-		ToFile:   "b/" + path,
-		Context:  3,
-	}
-	text, err := difflib.GetUnifiedDiffString(ud)
-	if err != nil || text == "" {
-		return nil, err
-	}
-	return strings.Split(strings.TrimRight(text, "\n"), "\n"), nil
 }
 
 // pathFiltersFrom extracts path args (non-flags, post "--") from args.

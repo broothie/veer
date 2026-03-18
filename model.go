@@ -19,10 +19,11 @@ const (
 )
 
 var (
-	styleAdd    = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
-	styleRem    = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
-	styleHunk   = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
-	styleFaint  = lipgloss.NewStyle().Faint(true)
+	styleAdd     = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	styleRem     = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+	styleAddLine = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Background(lipgloss.Color("22"))
+	styleRemLine = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Background(lipgloss.Color("52"))
+	styleFaint   = lipgloss.NewStyle().Faint(true)
 	styleBold   = lipgloss.NewStyle().Bold(true)
 	styleActive = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("2"))
 	styleBranch = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
@@ -290,26 +291,48 @@ func (m model) buildDiffContent() string {
 	if m.cursor >= len(m.files) {
 		return ""
 	}
+
+	f := m.files[m.cursor]
+	if len(f.Lines) == 0 {
+		return ""
+	}
+
+	// Determine line number column width from the largest line number.
+	maxNum := 0
+	for _, dl := range f.Lines {
+		if dl.OldNum > maxNum {
+			maxNum = dl.OldNum
+		}
+		if dl.NewNum > maxNum {
+			maxNum = dl.NewNum
+		}
+	}
+	numWidth := len(fmt.Sprint(maxNum))
+	if numWidth < 3 {
+		numWidth = 3
+	}
+
 	var sb strings.Builder
-	for _, line := range m.files[m.cursor].Lines {
-		sb.WriteString(colorDiffLine(line))
+	for _, dl := range f.Lines {
+		sb.WriteString(renderDiffLine(dl, numWidth))
 		sb.WriteByte('\n')
 	}
 	return sb.String()
 }
 
-func colorDiffLine(line string) string {
-	switch {
-	case strings.HasPrefix(line, "---") || strings.HasPrefix(line, "+++"):
-		return styleFaint.Render(line)
-	case strings.HasPrefix(line, "@@"):
-		return styleHunk.Render(line)
-	case strings.HasPrefix(line, "+"):
-		return styleAdd.Render(line)
-	case strings.HasPrefix(line, "-"):
-		return styleRem.Render(line)
+func renderDiffLine(dl DiffLine, numWidth int) string {
+	switch dl.Type {
+	case LineSeparator:
+		return styleFaint.Render(fmt.Sprintf("%*s …", numWidth, ""))
+	case LineContext:
+		num := styleFaint.Render(fmt.Sprintf("%*d", numWidth, dl.NewNum))
+		return num + "   " + dl.Content
+	case LineAdded:
+		return styleAddLine.Render(fmt.Sprintf("%*d + %s", numWidth, dl.NewNum, dl.Content))
+	case LineRemoved:
+		return styleRemLine.Render(fmt.Sprintf("%*d - %s", numWidth, dl.OldNum, dl.Content))
 	default:
-		return line
+		return ""
 	}
 }
 

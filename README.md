@@ -4,8 +4,9 @@ A live-diffing TUI for coding with AI.
 
 ## TODO
 
-- [ ] Line numbers
+- [x] Line numbers
 - [ ] Git history
 - [ ] CLI flags
 - [ ] Thicker sidebars
+- [ ] Continuous scroll
 - [ ] Refactor everything
