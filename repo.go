@@ -118,7 +118,7 @@ func (g *gitRepo) Status() (map[string]FileChange, error) {
 	root := g.wt.Filesystem.Root()
 	stdout, _, _, err := cob.Output(context.Background(), "git",
 		cob.SetDir(root),
-		cob.AddArgs("status", "--porcelain"),
+		cob.AddArgs("status", "--porcelain", "--untracked-files=all"),
 	)
 	if err != nil {
 		debugf("Status: failed: %v", err)
