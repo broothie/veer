@@ -129,6 +129,37 @@ func TestGitRepoStatus_Untracked(t *testing.T) {
 	}
 }
 
+func TestGitRepoStatus_UntrackedNestedFile(t *testing.T) {
+	dir := initTestRepo(t)
+	nestedDir := filepath.Join(dir, "scripts")
+	if err := os.MkdirAll(nestedDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nestedDir, "install.sh"), []byte("#!/bin/sh\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	repo, err := openRepoAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes, err := repo.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fc, ok := changes["scripts/install.sh"]
+	if !ok {
+		t.Fatalf("expected scripts/install.sh in changes, got %v", changes)
+	}
+	if fc.Staged {
+		t.Error("expected Staged=false for untracked nested file")
+	}
+	if !fc.Unstaged {
+		t.Error("expected Unstaged=true for untracked nested file")
+	}
+}
+
 func TestGitRepoStatus_IgnoresGitignored(t *testing.T) {
 	dir := initTestRepo(t)
 
