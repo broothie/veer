@@ -208,6 +208,25 @@ func TestHandleKey_NumberKeysSwitchPanes_WithCommitPane(t *testing.T) {
 	}
 }
 
+func TestUpdate_ForwardsBlinkMessagesToCommitInput(t *testing.T) {
+	m := testModel([]FileDiff{
+		{Path: "a.go", Lines: []DiffLine{{Type: LineAdded, NewNum: 1, Content: "pkg a"}}, Added: 1, Staged: true},
+	})
+	cmd := m.focusCommitMessage()
+	if cmd == nil {
+		t.Fatal("focusCommitMessage should return a cursor command")
+	}
+
+	result, cmd := m.Update(tea.FocusMsg{})
+	m = result.(model)
+	if m.focus != focusCommitMsg {
+		t.Fatalf("focus = %d, want focusCommitMsg", m.focus)
+	}
+	if cmd == nil {
+		t.Fatal("focus message should return a follow-up cursor blink command")
+	}
+}
+
 func TestHandleKey_ShiftTab_CyclesBackward(t *testing.T) {
 	m := testModel(twoFiles)
 	m.commits = []CommitInfo{{SHA: "abc1234", FullSHA: "abc1234full", Message: "test"}}
@@ -367,12 +386,6 @@ func TestRenderHeader_ContainsParts(t *testing.T) {
 	if !strings.Contains(header, "proj") {
 		t.Error("header should contain cwd")
 	}
-	if !strings.Contains(header, "abc1234") {
-		t.Error("header should contain SHA")
-	}
-	if !strings.Contains(header, "test commit") {
-		t.Error("header should contain message")
-	}
 	if !strings.Contains(header, "|") {
 		t.Error("header should use pipe separators")
 	}
@@ -393,8 +406,8 @@ func TestRenderHeader_NoMessage(t *testing.T) {
 	m := testModel(twoFiles)
 	m.message = ""
 	header := m.renderHeader()
-	if strings.Contains(header, "test commit") {
-		t.Error("should not contain message when empty")
+	if strings.Contains(header, "abc1234") || strings.Contains(header, "test commit") {
+		t.Error("header should not contain SHA or message")
 	}
 }
 
@@ -591,6 +604,18 @@ func TestRenderSidebar_ShowsFiles(t *testing.T) {
 	sidebar := m.renderSidebar(20)
 	if !strings.Contains(sidebar, "a.go") || !strings.Contains(sidebar, "b.go") {
 		t.Error("sidebar should show file names")
+	}
+}
+
+func TestRenderCommitInput_FocusedHasNoBackgroundFill(t *testing.T) {
+	m := testModel([]FileDiff{
+		{Path: "a.go", Lines: []DiffLine{{Type: LineAdded, NewNum: 1, Content: "pkg a"}}, Added: 1, Staged: true},
+	})
+	m.focus = focusCommitMsg
+
+	got := m.renderCommitInput()
+	if strings.Contains(got, "\x1b[48;") {
+		t.Fatal("focused commit input should not render a textarea background fill")
 	}
 }
 

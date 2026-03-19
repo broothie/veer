@@ -127,6 +127,16 @@ func newModel(cfg config) model {
 	ti.CharLimit = 500
 	ti.SetHeight(3)
 	ti.ShowLineNumbers = false
+	ti.FocusedStyle.Base = lipgloss.NewStyle()
+	ti.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	ti.FocusedStyle.Text = lipgloss.NewStyle()
+	ti.FocusedStyle.Prompt = stylePaneBorder
+	ti.FocusedStyle.Placeholder = styleFaint
+	ti.BlurredStyle.Base = lipgloss.NewStyle()
+	ti.BlurredStyle.CursorLine = lipgloss.NewStyle()
+	ti.BlurredStyle.Text = lipgloss.NewStyle()
+	ti.BlurredStyle.Prompt = stylePaneBorder
+	ti.BlurredStyle.Placeholder = styleFaint
 	m := model{
 		cfg:            cfg,
 		focus:          focusFiles,
@@ -321,6 +331,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseMsg:
 		return m.handleMouse(msg)
+	}
+
+	if m.focus == focusCommitMsg {
+		var cmd tea.Cmd
+		m.commitMsg, cmd = m.commitMsg.Update(msg)
+		return m, cmd
 	}
 
 	return m, nil

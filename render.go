@@ -72,9 +72,6 @@ func (m model) renderHeader() string {
 	if m.branch != "" {
 		parts = append(parts, styleBranch.Inherit(styleBar).Render(m.branch))
 	}
-	if m.sha != "" {
-		parts = append(parts, styleSHA.Inherit(styleBar).Render(m.sha))
-	}
 	if len(m.files) > 0 {
 		totalAdd, totalRem := 0, 0
 		for _, f := range m.files {
@@ -88,15 +85,6 @@ func (m model) renderHeader() string {
 	}
 
 	line := strings.Join(parts, styleBar.Render(sep))
-
-	if m.message != "" {
-		sepStr := sep
-		avail := m.width - lipgloss.Width(line) - lipgloss.Width(sepStr) - 1 // 1 for leading space
-		if avail > 3 {
-			msg := truncateRight(m.message, avail)
-			line += styleBar.Render(sepStr + msg)
-		}
-	}
 
 	return styleBar.Width(m.width).Render(" " + line)
 }

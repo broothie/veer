@@ -72,6 +72,7 @@ veer -d                 # enable debug logging to ~/.veer/debug.log
 - [ ] Fix header truncation
 - [ ] Fix line wrapping
 - [ ] Fix pane borders
+- [ ] Fix line numbers changing upon file/hunk staging
 - [ ] Add linux to goreleaser
 - [ ] Ensure README matches implementation
 - [ ] Flesh out tests
