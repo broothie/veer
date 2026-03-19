@@ -16,6 +16,7 @@ import (
 var version = "dev"
 var readBuildInfo = debug.ReadBuildInfo
 var runGit = func(args ...string) (string, error) {
+	// #nosec G204 -- args come from fixed internal version-probing call sites.
 	cmd := exec.Command("git", args...)
 	out, err := cmd.Output()
 	if err != nil {

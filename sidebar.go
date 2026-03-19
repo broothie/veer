@@ -7,7 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-var styleSidebar = lipgloss.NewStyle().PaddingRight(sidebarPad)
+var styleSidebar = lipgloss.NewStyle()
 
 // treeEntry is a row in the sidebar: either a directory header or a file.
 type treeEntry struct {
@@ -17,71 +17,68 @@ type treeEntry struct {
 }
 
 func (m model) renderSidebar(height int) string {
-	fileH, msgH, _ := m.sidebarSplit()
-	commitH := height - fileH - msgH
-
-	// File tree section.
-	fileSection := m.renderFileTree(fileH)
-
+	fileH, msgH, commitH := m.sidebarSplit()
 	lines := make([]string, 0, height)
 
-	// File tree lines.
-	fileLines := strings.Split(fileSection, "\n")
+	fileLines := strings.Split(m.renderFileTree(fileH), "\n")
 	lines = append(lines, fileLines...)
 	for len(lines) < fileH {
 		lines = append(lines, "")
 	}
 
-	// Commit message section.
 	if msgH > 0 {
-		msgLines := m.renderCommitInput()
+		msgLines := strings.Split(m.renderCommitInput(), "\n")
 		lines = append(lines, msgLines...)
 		for len(lines) < fileH+msgH {
 			lines = append(lines, "")
 		}
 	}
 
-	// Commit list section.
-	commitSection := m.renderCommitList(commitH)
-	commitLines := strings.Split(commitSection, "\n")
+	commitLines := strings.Split(m.renderHistoryBody(commitH), "\n")
 	lines = append(lines, commitLines...)
 	for len(lines) < height {
 		lines = append(lines, "")
 	}
 
 	return styleSidebar.
-		Width(m.sidebarWidth + sidebarPad).
+		Width(m.sidebarWidth).
 		Height(height).
 		Render(strings.Join(lines[:height], "\n"))
 }
 
-func (m model) renderCommitInput() []string {
-	label := " commit "
-	lineWidth := m.sidebarWidth - lipgloss.Width(label)
-	if lineWidth < 0 {
-		lineWidth = 0
+func (m model) renderHistoryBody(commitH int) string {
+	lines := make([]string, 0, commitH)
+	commitSection := m.renderCommitList(commitH)
+	commitLines := strings.Split(commitSection, "\n")
+	lines = append(lines, commitLines...)
+	for len(lines) < commitH {
+		lines = append(lines, "")
 	}
-	header := styleFaint.Render(label + strings.Repeat("─", lineWidth))
 
+	return styleSidebar.
+		Width(m.sidebarWidth).
+		Height(commitH).
+		Render(strings.Join(lines[:commitH], "\n"))
+}
+
+func (m model) renderCommitInput() string {
 	if m.focus == focusCommitMsg {
 		m.commitMsg.SetWidth(m.sidebarWidth)
 		view := m.commitMsg.View()
 		viewLines := strings.Split(view, "\n")
-		result := []string{header}
-		result = append(result, viewLines...)
-		// Pad to exactly 3 input lines.
-		for len(result) < 4 {
+		result := append([]string(nil), viewLines...)
+		for len(result) < 3 {
 			result = append(result, "")
 		}
-		return result[:4]
+		return strings.Join(result[:3], "\n")
 	}
 
-	return []string{
-		header,
+	lines := []string{
 		styleFaint.Render(" c: type message"),
 		"",
 		"",
 	}
+	return strings.Join(lines, "\n")
 }
 
 func (m model) renderFileTree(height int) string {
@@ -115,17 +112,6 @@ func (m model) renderCommitList(height int) string {
 
 	var lines []string
 
-	// History header line.
-	{
-		label := " history "
-		lineWidth := m.sidebarWidth - lipgloss.Width(label)
-		if lineWidth < 0 {
-			lineWidth = 0
-		}
-		lines = append(lines, styleFaint.Render(label+strings.Repeat("─", lineWidth)))
-		height-- // consume one row
-	}
-
 	total := len(m.commits) + 1 // +1 for HEAD entry
 
 	start := m.commitOffset
@@ -133,43 +119,29 @@ func (m model) renderCommitList(height int) string {
 
 	for i := start; i < end; i++ {
 		if i == 0 {
-			// HEAD entry.
-			prefix := "  "
-			if m.commitCursor == 0 && m.focus == focusCommits {
-				prefix = "> "
-			}
 			headLabel := "HEAD"
 			if m.branch != "" {
 				headLabel += " (" + m.branch + ")"
 			}
-			// Truncate to fit sidebar width.
-			markerWidth := lipgloss.Width("● ")
-			maxLabel := m.sidebarWidth - lipgloss.Width(prefix) - markerWidth
-			if len(headLabel) > maxLabel && maxLabel > 3 {
-				headLabel = headLabel[:maxLabel-1] + "…"
-			}
+			selected := m.commitCursor == 0
 			if m.selectedCommit == -1 {
-				headLabel = styleActive.Render("● ") + headLabel
+				headLabel = renderSidebarStyled("● ", styleActive, selected) + renderSidebarText(headLabel, selected)
 			} else {
-				headLabel = styleFaint.Render("○ ") + headLabel
+				headLabel = renderSidebarStyled("○ ", styleFaint, selected) + renderSidebarText(headLabel, selected)
 			}
-			lines = append(lines, prefix+headLabel)
+			lines = append(lines, renderSelectableSidebarRow(headLabel, m.sidebarWidth, selected))
 		} else {
 			ci := i - 1
 			if ci >= len(m.commits) {
 				continue
 			}
 			c := m.commits[ci]
+			selected := m.commitCursor == i
 
-			prefix := "  "
-			if m.commitCursor == i && m.focus == focusCommits {
-				prefix = "> "
-			}
-
-			sha := styleSHA.Render(c.SHA)
+			sha := renderSidebarStyled(c.SHA, styleSHA, selected)
 
 			// Truncate message to fit.
-			usedWidth := lipgloss.Width(prefix) + lipgloss.Width(c.SHA) + 3 // 3 for "● " + space
+			usedWidth := lipgloss.Width(c.SHA) + 3 // 3 for "● " + space
 			msgMax := m.sidebarWidth - usedWidth
 			msg := c.Message
 			if len(msg) > msgMax && msgMax > 3 {
@@ -180,16 +152,13 @@ func (m model) renderCommitList(height int) string {
 
 			var marker string
 			if m.selectedCommit == ci {
-				marker = styleActive.Render("● ")
+				marker = renderSidebarStyled("● ", styleActive, selected)
 			} else {
-				marker = styleFaint.Render("○ ")
+				marker = renderSidebarStyled("○ ", styleFaint, selected)
 			}
 
-			line := prefix + marker + sha + " " + msg
-			if m.commitCursor == i && m.focus == focusCommits {
-				// Already has > prefix, that's enough.
-			}
-			lines = append(lines, line)
+			line := marker + sha + renderSidebarText(" "+msg, selected)
+			lines = append(lines, renderSelectableSidebarRow(line, m.sidebarWidth, selected))
 		}
 	}
 
@@ -207,54 +176,84 @@ func (m model) renderTreeEntry(e treeEntry) string {
 
 	addStr := fmt.Sprintf("+%d", f.Added)
 	remStr := fmt.Sprintf("-%d", f.Removed)
+	selected := e.fileIdx == m.cursor
 
 	// Status indicator: S=staged, M=unstaged (modified).
 	var status, coloredStatus string
 	switch {
 	case f.Staged && f.Unstaged:
 		status = "SM"
-		coloredStatus = styleStaged.Render("S") + styleSHA.Render("M")
+		coloredStatus = renderSidebarStyled("S", styleStaged, selected) + renderSidebarStyled("M", styleSHA, selected)
 	case f.Staged:
 		status = "S "
-		coloredStatus = styleStaged.Render("S") + " "
+		coloredStatus = renderSidebarStyled("S", styleStaged, selected) + renderSidebarText(" ", selected)
 	default:
 		status = "M "
-		coloredStatus = styleSHA.Render("M") + " "
+		coloredStatus = renderSidebarStyled("M", styleSHA, selected) + renderSidebarText(" ", selected)
 	}
 
 	delta := addStr + " " + remStr + " " + status
-	coloredDelta := styleAdd.Render(addStr) + " " + styleRem.Render(remStr) + " " + coloredStatus
+	coloredDelta := renderSidebarStyled(addStr, styleAdd, selected) +
+		renderSidebarText(" ", selected) +
+		renderSidebarStyled(remStr, styleRem, selected) +
+		renderSidebarText(" ", selected) +
+		coloredStatus
 
 	var marker string
-	if e.fileIdx == m.cursor {
-		marker = styleActive.Render("● ")
+	if selected {
+		marker = renderSidebarStyled("● ", styleActive, selected)
 	} else {
-		marker = styleFaint.Render("○ ")
+		marker = renderSidebarStyled("○ ", styleFaint, selected)
 	}
 	markerWidth := lipgloss.Width("● ")
 
 	// Use lipgloss.Width for accurate width calculation.
+	rowWidth := m.sidebarWidth
 	usedWidth := lipgloss.Width(indent) + markerWidth + lipgloss.Width(delta)
-	nameMaxLen := m.sidebarWidth - usedWidth - 1 // 1 for gap
+	nameMaxLen := rowWidth - usedWidth - 1 // 1 for gap
 	name := e.name
 	if len(name) > nameMaxLen && nameMaxLen > 3 {
 		name = name[:nameMaxLen-1] + "…"
 	}
 
-	gap := m.sidebarWidth - lipgloss.Width(indent) - markerWidth - lipgloss.Width(name) - lipgloss.Width(delta)
+	gap := rowWidth - lipgloss.Width(indent) - markerWidth - lipgloss.Width(name) - lipgloss.Width(delta)
 	if gap < 1 {
 		gap = 1
 	}
 	padding := strings.Repeat(" ", gap)
 
-	if e.fileIdx == m.cursor {
-		if m.focus == focusFiles {
-			return indent + marker + styleActive.Render(name) + padding + coloredDelta
-		}
-		return indent + marker + styleBold.Render(name) + padding + coloredDelta
+	line := renderSidebarText(indent, selected) + marker + renderSidebarText(name, selected) + renderSidebarText(padding, selected) + coloredDelta
+	if selected {
+		line = renderSidebarText(indent, selected) + marker + renderSidebarStyled(name, styleBold, selected) + renderSidebarText(padding, selected) + coloredDelta
 	}
 
-	return indent + marker + name + padding + coloredDelta
+	return renderSelectableSidebarRow(line, m.sidebarWidth, selected)
+}
+
+func renderSelectableSidebarRow(content string, width int, selected bool) string {
+	if width < 1 {
+		return content
+	}
+
+	if !selected {
+		return lipgloss.NewStyle().Width(width).Render(content)
+	}
+
+	return styleSelectBG.Width(width).Render(content)
+}
+
+func renderSidebarText(text string, selected bool) string {
+	if selected {
+		return styleSelectBG.Render(text)
+	}
+	return text
+}
+
+func renderSidebarStyled(text string, style lipgloss.Style, selected bool) string {
+	if selected {
+		return style.Inherit(styleSelectBG).Render(text)
+	}
+	return style.Render(text)
 }
 
 // buildTree converts a sorted list of file diffs into an indented tree of entries.

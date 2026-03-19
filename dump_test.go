@@ -26,7 +26,7 @@ func TestBuildDumpView_RendersFrame(t *testing.T) {
 		t.Fatalf("buildDumpView: %v", err)
 	}
 
-	if !strings.Contains(view, "abc1234") {
+	if !strings.Contains(view, "~/proj") || !strings.Contains(view, "main") {
 		t.Fatal("dump view should include header metadata")
 	}
 	if !strings.Contains(view, "hello.txt") {

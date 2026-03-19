@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -15,9 +16,9 @@ const (
 	defaultSidebarWidth = 35
 	minSidebarWidth     = 15
 	maxSidebarWidth     = 80
-	sidebarPad          = 1
 	headerHeight        = 1 // header bar
 	statusHeight        = 1 // status bar
+	paneBorderSize      = 2
 )
 
 type focusArea int
@@ -38,6 +39,7 @@ var (
 	styleFaint    = lipgloss.NewStyle().Faint(true)
 	styleBold     = lipgloss.NewStyle().Bold(true)
 	styleActive   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("2"))
+	styleSelectBG = lipgloss.NewStyle().Background(lipgloss.Color("237"))
 	styleBranch   = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
 	styleSHA      = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
 	styleDir      = lipgloss.NewStyle().Faint(true)
@@ -125,6 +127,16 @@ func newModel(cfg config) model {
 	ti.CharLimit = 500
 	ti.SetHeight(3)
 	ti.ShowLineNumbers = false
+	ti.FocusedStyle.Base = lipgloss.NewStyle()
+	ti.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	ti.FocusedStyle.Text = lipgloss.NewStyle()
+	ti.FocusedStyle.Prompt = stylePaneBorder
+	ti.FocusedStyle.Placeholder = styleFaint
+	ti.BlurredStyle.Base = lipgloss.NewStyle()
+	ti.BlurredStyle.CursorLine = lipgloss.NewStyle()
+	ti.BlurredStyle.Text = lipgloss.NewStyle()
+	ti.BlurredStyle.Prompt = stylePaneBorder
+	ti.BlurredStyle.Placeholder = styleFaint
 	m := model{
 		cfg:            cfg,
 		focus:          focusFiles,
@@ -135,7 +147,7 @@ func newModel(cfg config) model {
 		selectedCommit: -1,
 		commitMsg:      ti,
 	}
-	m.viewport = viewport.New(m.vpWidth(), m.mainHeight())
+	m.viewport = viewport.New(m.vpWidth(), m.paneBodyHeight())
 	return m
 }
 
@@ -321,6 +333,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleMouse(msg)
 	}
 
+	if m.focus == focusCommitMsg {
+		var cmd tea.Cmd
+		m.commitMsg, cmd = m.commitMsg.Update(msg)
+		return m, cmd
+	}
+
 	return m, nil
 }
 
@@ -328,13 +346,32 @@ func (m model) mainHeight() int {
 	return max(1, m.height-headerHeight-statusHeight)
 }
 
+func (m model) paneBodyHeight() int {
+	return max(1, m.mainHeight()-paneBorderSize)
+}
+
+func (m model) leftPaneCount() int {
+	if m.commitMsgVisible() {
+		return 3
+	}
+	return 2
+}
+
+func (m model) sidebarBodyHeight() int {
+	return max(1, m.mainHeight()-(m.leftPaneCount()*paneBorderSize))
+}
+
+func (m model) sidebarPaneWidth() int {
+	return m.sidebarWidth + paneBorderSize
+}
+
 func (m model) vpWidth() int {
-	return max(1, m.width-m.sidebarWidth-sidebarPad-3) // -1 sidebar scrollbar, -1 border, -1 diff scrollbar
+	return max(1, m.width-m.sidebarPaneWidth()-paneBorderSize)
 }
 
 func (m *model) recalcLayout() {
 	prevYOffset := m.viewport.YOffset
-	m.viewport = viewport.New(m.vpWidth(), m.mainHeight())
+	m.viewport = viewport.New(m.vpWidth(), m.paneBodyHeight())
 	m.diffGen++
 	m.lastBuiltGen = 0
 	m.rebuildDiffContent()
@@ -397,6 +434,54 @@ func (m model) hasStaged() bool {
 
 func (m model) commitMsgVisible() bool {
 	return m.isWorkingTree() && (m.hasStaged() || m.focus == focusCommitMsg)
+}
+
+func (m model) paneOrder() []focusArea {
+	areas := []focusArea{focusFiles}
+	if m.commitMsgVisible() {
+		areas = append(areas, focusCommitMsg)
+	}
+	areas = append(areas, focusCommits)
+	areas = append(areas, focusDiff)
+	return areas
+}
+
+func (m model) paneTitle(area focusArea) string {
+	n := 0
+	for i, a := range m.paneOrder() {
+		if a == area {
+			n = i + 1
+			break
+		}
+	}
+
+	switch area {
+	case focusFiles:
+		return fmt.Sprintf(" %d. files ", n)
+	case focusCommitMsg:
+		return fmt.Sprintf(" %d. commit ", n)
+	case focusCommits:
+		return fmt.Sprintf(" %d. history ", n)
+	case focusDiff:
+		switch {
+		case m.selectedCommit >= 0 && m.sha != "":
+			return fmt.Sprintf(" %d. diff commit %s ", n, m.sha)
+		case m.cfg.Ref != "":
+			return fmt.Sprintf(" %d. diff vs %s ", n, m.cfg.Ref)
+		default:
+			return fmt.Sprintf(" %d. diff vs HEAD ", n)
+		}
+	}
+
+	return ""
+}
+
+func (m model) paneShortcutHint() string {
+	keys := make([]string, 0, len(m.paneOrder()))
+	for i := range m.paneOrder() {
+		keys = append(keys, fmt.Sprintf("%d", i+1))
+	}
+	return strings.Join(keys, "/") + ": panes"
 }
 
 func (m *model) toggleStage() tea.Cmd {
@@ -505,6 +590,45 @@ func (m *model) focusCommitMessage() tea.Cmd {
 	return m.commitMsg.Focus()
 }
 
+func (m *model) focusHistoryPane() tea.Cmd {
+	if m.focus == focusCommitMsg {
+		m.commitMsg.Blur()
+	}
+	m.focus = focusCommits
+	return nil
+}
+
+func (m *model) focusPane(key string) tea.Cmd {
+	idx := int(key[0] - '1')
+	areas := m.paneOrder()
+	if idx < 0 || idx >= len(areas) {
+		return nil
+	}
+
+	target := areas[idx]
+	switch target {
+	case focusFiles:
+		if m.focus == focusCommitMsg {
+			m.commitMsg.Blur()
+		}
+		m.focus = focusFiles
+		return nil
+	case focusCommitMsg:
+		return m.focusCommitMessage()
+	case focusCommits:
+		return m.focusHistoryPane()
+	case focusDiff:
+		if len(m.files) == 0 {
+			return nil
+		}
+		if m.focus == focusCommitMsg {
+			m.commitMsg.Blur()
+		}
+		m.focus = focusDiff
+	}
+	return nil
+}
+
 func (m model) submitCommit() (tea.Model, tea.Cmd) {
 	msg := strings.TrimSpace(m.commitMsg.Value())
 	if msg == "" || m.repoRoot == "" {
@@ -517,6 +641,10 @@ func (m model) submitCommit() (tea.Model, tea.Cmd) {
 }
 
 func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if key := msg.String(); len(key) == 1 && key[0] >= '1' && key[0] <= '9' {
+		return m, m.focusPane(key)
+	}
+
 	// Commit message input handles its own keys.
 	if m.focus == focusCommitMsg {
 		switch msg.String() {
@@ -579,20 +707,15 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // cycleTab advances focus forward (dir=1) or backward (dir=-1).
 // Order: focusFiles → focusCommitMsg → focusCommits → focusDiff → focusFiles
 func (m *model) cycleTab(dir int) {
-	hasCommits := len(m.commits) > 0
-	hasFiles := len(m.files) > 0
-	hasCommitMsg := m.commitMsgVisible()
-
-	// Build ordered list of available focus areas.
-	areas := []focusArea{focusFiles}
-	if hasCommitMsg {
-		areas = append(areas, focusCommitMsg)
-	}
-	if hasCommits {
-		areas = append(areas, focusCommits)
-	}
-	if hasFiles {
-		areas = append(areas, focusDiff)
+	areas := m.paneOrder()
+	if len(m.files) == 0 {
+		filtered := areas[:0]
+		for _, a := range areas {
+			if a != focusDiff {
+				filtered = append(filtered, a)
+			}
+		}
+		areas = filtered
 	}
 	if len(areas) <= 1 {
 		return
@@ -737,7 +860,7 @@ func (m model) selectCommit() (tea.Model, tea.Cmd) {
 }
 
 func (m model) sidebarBorderX() int {
-	return m.sidebarWidth + sidebarPad
+	return m.sidebarPaneWidth() - 1
 }
 
 func (m model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
@@ -769,7 +892,7 @@ func (m model) handleMouseLeft(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseActionMotion:
 		if m.dragging {
-			newWidth := max(minSidebarWidth, min(maxSidebarWidth, msg.X-sidebarPad))
+			newWidth := max(minSidebarWidth, min(maxSidebarWidth, msg.X-2))
 			if newWidth != m.sidebarWidth {
 				m.sidebarWidth = newWidth
 				m.recalcLayout()
@@ -783,8 +906,17 @@ func (m model) handleMouseLeft(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) handleMouseClick(msg tea.MouseMsg, borderX int) (tea.Model, tea.Cmd) {
-	if msg.X > borderX {
+	row := msg.Y - headerHeight
+	if row < 0 || row >= m.mainHeight() {
+		return m, nil
+	}
+
+	if msg.X >= m.sidebarPaneWidth() {
+		bodyRow := row - 1
 		m.focus = focusDiff
+		if bodyRow < 0 || bodyRow >= m.paneBodyHeight() {
+			return m, nil
+		}
 		// Click in diff area — stage the clicked hunk.
 		if cmd := m.stageHunkAtY(msg.Y); cmd != nil {
 			return m, cmd
@@ -792,41 +924,63 @@ func (m model) handleMouseClick(msg tea.MouseMsg, borderX int) (tea.Model, tea.C
 		return m, nil
 	}
 
-	fileH, msgH, _ := m.sidebarSplit()
-	row := msg.Y - headerHeight
-	commitStart := fileH + msgH
+	fileH, msgH, commitH := m.sidebarSplit()
+	filePaneH := fileH + paneBorderSize
+	if row < filePaneH {
+		if row == 0 || row == filePaneH-1 {
+			m.focus = focusFiles
+			return m, nil
+		}
 
-	if msgH > 0 && row >= fileH && row < commitStart {
+		bodyRow := row - 1
+		treeRow := m.sidebarOffset + bodyRow
+		if treeRow >= 0 && treeRow < len(m.tree) {
+			entry := m.tree[treeRow]
+			if entry.fileIdx >= 0 {
+				// Click on status indicator (right side) toggles staging.
+				innerX := msg.X - 1
+				if innerX >= m.sidebarWidth-5 && innerX < m.sidebarWidth {
+					if cmd := m.stageFileAt(entry.fileIdx); cmd != nil {
+						return m, cmd
+					}
+					return m, nil
+				}
+				m.setCursor(entry.fileIdx)
+				m.focus = focusDiff
+			}
+		}
+		return m, nil
+	}
+
+	commitPaneH := 0
+	if msgH > 0 {
+		commitPaneH = msgH + paneBorderSize
+	}
+	if msgH > 0 && row < filePaneH+commitPaneH {
+		commitRow := row - filePaneH
+		if commitRow == 0 || commitRow == commitPaneH-1 {
+			m.focus = focusCommitMsg
+			return m, m.commitMsg.Focus()
+		}
 		m.focus = focusCommitMsg
 		return m, m.commitMsg.Focus()
 	}
 
-	if row >= commitStart {
-		return m.handleCommitClick(row, commitStart)
+	historyRow := row - filePaneH - commitPaneH
+	historyPaneH := commitH + paneBorderSize
+	if historyRow < 0 || historyRow >= historyPaneH {
+		return m, nil
+	}
+	if historyRow == 0 || historyRow == historyPaneH-1 {
+		m.focus = focusCommits
+		return m, nil
 	}
 
-	// Click in file tree area.
-	treeRow := m.sidebarOffset + row
-	if treeRow >= 0 && treeRow < len(m.tree) {
-		entry := m.tree[treeRow]
-		if entry.fileIdx >= 0 {
-			// Click on status indicator (right side) toggles staging.
-			if msg.X >= m.sidebarWidth-5 {
-				if cmd := m.stageFileAt(entry.fileIdx); cmd != nil {
-					return m, cmd
-				}
-				return m, nil
-			}
-			m.setCursor(entry.fileIdx)
-			m.focus = focusDiff
-		}
-	}
-	return m, nil
+	return m.handleCommitClick(historyRow - 1)
 }
 
-func (m model) handleCommitClick(row, commitStart int) (tea.Model, tea.Cmd) {
-	header := m.branchHeaderRows()
-	commitRow := m.commitOffset + (row - commitStart - header)
+func (m model) handleCommitClick(row int) (tea.Model, tea.Cmd) {
+	commitRow := m.commitOffset + row
 	total := len(m.commits) + 1
 	if commitRow >= 0 && commitRow < total {
 		m.commitCursor = commitRow
@@ -838,10 +992,18 @@ func (m model) handleCommitClick(row, commitStart int) (tea.Model, tea.Cmd) {
 
 func (m *model) handleMouseScroll(msg tea.MouseMsg, dir int) tea.Cmd {
 	borderX := m.sidebarBorderX()
-	fileH, msgH, _ := m.sidebarSplit()
-	commitStart := fileH + msgH
+	fileH, msgH, commitH := m.sidebarSplit()
 
-	if msg.X > borderX {
+	row := msg.Y - headerHeight
+	if row < 0 || row >= m.mainHeight() {
+		return nil
+	}
+
+	if msg.X >= m.sidebarPaneWidth() || msg.X > borderX {
+		bodyRow := row - 1
+		if bodyRow < 0 || bodyRow >= m.paneBodyHeight() {
+			return nil
+		}
 		if dir > 0 {
 			m.viewport.LineDown(3)
 		} else {
@@ -851,17 +1013,34 @@ func (m *model) handleMouseScroll(msg tea.MouseMsg, dir int) tea.Cmd {
 		return nil
 	}
 
-	row := msg.Y - headerHeight
-	if row >= commitStart {
-		return m.scrollCommitList(dir)
+	filePaneH := fileH + paneBorderSize
+	if row < filePaneH {
+		if row == 0 || row == filePaneH-1 {
+			return nil
+		}
+		m.scrollFileTree(dir)
+		return nil
 	}
-	m.scrollFileTree(dir)
-	return nil
+
+	commitPaneH := 0
+	if msgH > 0 {
+		commitPaneH = msgH + paneBorderSize
+	}
+	if msgH > 0 && row < filePaneH+commitPaneH {
+		return nil
+	}
+
+	historyRow := row - filePaneH - commitPaneH
+	historyPaneH := commitH + paneBorderSize
+	if historyRow < 0 || historyRow >= historyPaneH || historyRow == 0 || historyRow == historyPaneH-1 {
+		return nil
+	}
+	return m.scrollCommitList(dir)
 }
 
 func (m *model) scrollCommitList(dir int) tea.Cmd {
 	total := len(m.commits) + 1
-	commitH := m.commitListHeight() - m.branchHeaderRows()
+	commitH := m.commitListHeight()
 	if dir > 0 {
 		if m.commitCursor < total-1 {
 			m.commitCursor++
@@ -885,22 +1064,28 @@ func (m *model) scrollFileTree(dir int) {
 	}
 }
 
-func (m model) branchHeaderRows() int {
-	if m.branch != "" || m.sha != "" {
-		return 1
-	}
-	return 0
-}
-
 // sidebarSplit returns (fileTreeHeight, commitMsgHeight, commitListHeight).
 func (m model) sidebarSplit() (int, int, int) {
-	mainH := m.mainHeight()
-	commitH := m.commitListHeight()
+	mainH := m.sidebarBodyHeight()
 	var msgH int
 	if m.commitMsgVisible() {
-		msgH = 4 // label + 3 input lines
+		msgH = 3
 	}
+	commitH := m.commitListHeight()
 	fileH := mainH - commitH - msgH
+	if fileH < 1 {
+		deficit := 1 - fileH
+		if commitH > 1 {
+			reduce := min(deficit, commitH-1)
+			commitH -= reduce
+			deficit -= reduce
+		}
+		if deficit > 0 && msgH > 0 {
+			reduce := min(deficit, msgH)
+			msgH -= reduce
+		}
+		fileH = mainH - commitH - msgH
+	}
 	if fileH < 1 {
 		fileH = 1
 	}
@@ -908,9 +1093,9 @@ func (m model) sidebarSplit() (int, int, int) {
 }
 
 func (m model) commitListHeight() int {
-	mainH := m.mainHeight()
+	mainH := m.sidebarBodyHeight()
 	total := len(m.commits) + 1 // +1 for working tree entry
-	h := min(total+m.branchHeaderRows(), mainH/3)
+	h := min(total, mainH/3)
 	return max(h, 3) // at least 3 rows
 }
 
@@ -922,8 +1107,9 @@ func (m model) View() string {
 	header := m.renderHeader()
 
 	mainH := m.mainHeight()
+	diffBodyH := m.paneBodyHeight()
 
-	fileH, _, _ := m.sidebarSplit()
+	fileH, msgH, commitH := m.sidebarSplit()
 
 	// Keep cursor's tree row visible in file tree scroll region.
 	cursorRow := m.cursorTreeRow()
@@ -934,38 +1120,39 @@ func (m model) View() string {
 	}
 
 	// Keep commit cursor visible.
-	commitH := m.commitListHeight()
-	visibleCommits := commitH - m.branchHeaderRows()
+	visibleCommits := commitH
 	if m.commitCursor < m.commitOffset {
 		m.commitOffset = m.commitCursor
 	} else if m.commitCursor >= m.commitOffset+visibleCommits {
 		m.commitOffset = m.commitCursor - visibleCommits + 1
 	}
 
-	sidebar := m.renderSidebar(mainH)
 	content := m.viewport.View()
 
 	// Diff scrollbar.
 	totalDiffLines := m.viewport.TotalLineCount()
-	diffScrollbar := renderScrollbar(mainH, totalDiffLines, m.viewport.YOffset)
+	diffScrollbar := renderScrollbar(diffBodyH, totalDiffLines, m.viewport.YOffset, m.focus == focusDiff)
 
-	// Sidebar scrollbar for focused sub-panel.
-	var sidebarScrollbar string
-	if m.focus == focusCommits {
-		total := len(m.commits) + 1
-		sidebarScrollbar = renderScrollbar(mainH, total, m.commitOffset)
-	} else {
-		sidebarScrollbar = renderScrollbar(mainH, len(m.tree), m.sidebarOffset)
+	fileScrollbar := renderScrollbar(fileH, len(m.tree), m.sidebarOffset, m.focus == focusFiles)
+	filePane := renderPane(m.paneTitle(focusFiles), m.renderFileTree(fileH), fileScrollbar, m.sidebarPaneWidth(), fileH+paneBorderSize, m.focus == focusFiles)
+
+	var commitPane string
+	if msgH > 0 {
+		commitPane = renderPane(m.paneTitle(focusCommitMsg), m.renderCommitInput(), "", m.sidebarPaneWidth(), msgH+paneBorderSize, m.focus == focusCommitMsg)
 	}
 
-	border := renderBorder(mainH)
-	if sidebarScrollbar == "" {
-		sidebarScrollbar = renderEmptyColumn(mainH)
+	commitScrollbar := renderScrollbar(commitH, len(m.commits)+1, m.commitOffset, m.focus == focusCommits)
+	historyFocused := m.focus == focusCommits
+	historyPane := renderPane(m.paneTitle(focusCommits), m.renderHistoryBody(commitH), commitScrollbar, m.sidebarPaneWidth(), commitH+paneBorderSize, historyFocused)
+
+	diffPane := renderPane(m.paneTitle(focusDiff), content, diffScrollbar, m.width-m.sidebarPaneWidth(), mainH, m.focus == focusDiff)
+	sidebarPanes := []string{filePane}
+	if commitPane != "" {
+		sidebarPanes = append(sidebarPanes, commitPane)
 	}
-	if diffScrollbar == "" {
-		diffScrollbar = renderEmptyColumn(mainH)
-	}
-	main := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, sidebarScrollbar, border, content, diffScrollbar)
+	sidebarPanes = append(sidebarPanes, historyPane)
+	sidebarColumn := lipgloss.JoinVertical(lipgloss.Left, sidebarPanes...)
+	main := lipgloss.JoinHorizontal(lipgloss.Top, sidebarColumn, diffPane)
 	status := m.renderStatus()
 
 	return lipgloss.JoinVertical(lipgloss.Left, header, main, status)

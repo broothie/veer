@@ -38,6 +38,10 @@ func initTestRepo(t *testing.T) string {
 		cmd := exec.Command(args[0], args[1:]...)
 		cmd.Dir = dir
 		cmd.Env = append(os.Environ(),
+			"HOME="+dir,
+			"XDG_CONFIG_HOME="+dir,
+			"GIT_CONFIG_NOSYSTEM=1",
+			"GIT_TERMINAL_PROMPT=0",
 			"GIT_AUTHOR_NAME=test",
 			"GIT_AUTHOR_EMAIL=test@test.com",
 			"GIT_COMMITTER_NAME=test",

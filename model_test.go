@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -10,6 +11,12 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
+
+var ansiRE = regexp.MustCompile("\x1b\\[[0-9;]*m")
+
+func stripANSI(s string) string {
+	return ansiRE.ReplaceAllString(s, "")
+}
 
 func testModel(files []FileDiff) model {
 	m := model{
@@ -153,6 +160,73 @@ func TestHandleKey_Tab_CyclesFocus(t *testing.T) {
 	}
 }
 
+func TestHandleKey_NumberKeysSwitchPanes(t *testing.T) {
+	m := testModel(twoFiles)
+	m.commits = []CommitInfo{{SHA: "abc1234", FullSHA: "abc1234full", Message: "test"}}
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	m = result.(model)
+	if m.focus != focusDiff {
+		t.Fatalf("3 should focus diff, got %d", m.focus)
+	}
+
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	m = result.(model)
+	if m.focus != focusCommits {
+		t.Fatalf("2 should focus history, got %d", m.focus)
+	}
+
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	m = result.(model)
+	if m.focus != focusFiles {
+		t.Fatalf("1 should focus files, got %d", m.focus)
+	}
+}
+
+func TestHandleKey_NumberKeysSwitchPanes_WithCommitPane(t *testing.T) {
+	m := testModel([]FileDiff{
+		{Path: "a.go", Lines: []DiffLine{{Type: LineAdded, NewNum: 1, Content: "pkg a"}}, Added: 1, Staged: true},
+	})
+	m.commits = []CommitInfo{{SHA: "abc1234", FullSHA: "abc1234full", Message: "test"}}
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	m = result.(model)
+	if m.focus != focusCommitMsg {
+		t.Fatalf("2 should focus commit pane when visible, got %d", m.focus)
+	}
+
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	m = result.(model)
+	if m.focus != focusCommits {
+		t.Fatalf("3 should focus history when commit pane visible, got %d", m.focus)
+	}
+
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	m = result.(model)
+	if m.focus != focusDiff {
+		t.Fatalf("4 should focus diff when commit pane visible, got %d", m.focus)
+	}
+}
+
+func TestUpdate_ForwardsBlinkMessagesToCommitInput(t *testing.T) {
+	m := testModel([]FileDiff{
+		{Path: "a.go", Lines: []DiffLine{{Type: LineAdded, NewNum: 1, Content: "pkg a"}}, Added: 1, Staged: true},
+	})
+	cmd := m.focusCommitMessage()
+	if cmd == nil {
+		t.Fatal("focusCommitMessage should return a cursor command")
+	}
+
+	result, cmd := m.Update(tea.FocusMsg{})
+	m = result.(model)
+	if m.focus != focusCommitMsg {
+		t.Fatalf("focus = %d, want focusCommitMsg", m.focus)
+	}
+	if cmd == nil {
+		t.Fatal("focus message should return a follow-up cursor blink command")
+	}
+}
+
 func TestHandleKey_ShiftTab_CyclesBackward(t *testing.T) {
 	m := testModel(twoFiles)
 	m.commits = []CommitInfo{{SHA: "abc1234", FullSHA: "abc1234full", Message: "test"}}
@@ -184,11 +258,11 @@ func TestHandleKey_Tab_SkipsCommitsWhenEmpty(t *testing.T) {
 	m := testModel(twoFiles)
 	m.focus = focusFiles
 
-	// No commits: files -> diff (skip commits)
+	// With no log commits, history pane still exists via HEAD entry.
 	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m = result.(model)
-	if m.focus != focusDiff {
-		t.Errorf("tab with no commits: focus = %d, want focusDiff", m.focus)
+	if m.focus != focusCommits {
+		t.Errorf("tab with no commits: focus = %d, want focusCommits", m.focus)
 	}
 }
 
@@ -222,8 +296,8 @@ func TestHandleKey_ShiftTab_DiffToFiles(t *testing.T) {
 
 	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
 	m = result.(model)
-	if m.focus != focusFiles {
-		t.Error("shift+tab from diff (no commits) should switch focus to files")
+	if m.focus != focusCommits {
+		t.Error("shift+tab from diff should switch focus to history")
 	}
 }
 
@@ -312,11 +386,8 @@ func TestRenderHeader_ContainsParts(t *testing.T) {
 	if !strings.Contains(header, "proj") {
 		t.Error("header should contain cwd")
 	}
-	if !strings.Contains(header, "abc1234") {
-		t.Error("header should contain SHA")
-	}
-	if !strings.Contains(header, "test commit") {
-		t.Error("header should contain message")
+	if !strings.Contains(header, "|") {
+		t.Error("header should use pipe separators")
 	}
 }
 
@@ -335,8 +406,8 @@ func TestRenderHeader_NoMessage(t *testing.T) {
 	m := testModel(twoFiles)
 	m.message = ""
 	header := m.renderHeader()
-	if strings.Contains(header, "test commit") {
-		t.Error("should not contain message when empty")
+	if strings.Contains(header, "abc1234") || strings.Contains(header, "test commit") {
+		t.Error("header should not contain SHA or message")
 	}
 }
 
@@ -386,6 +457,12 @@ func TestRenderStatus_FocusHints(t *testing.T) {
 	status := m.renderStatus()
 	if !strings.Contains(status, "s: stage") {
 		t.Error("file-focused status should show stage hint")
+	}
+	if !strings.Contains(status, "1/2/3: panes") {
+		t.Error("status should show number pane-switch hints")
+	}
+	if !strings.Contains(status, "|") {
+		t.Error("status should use pipe separators")
 	}
 
 	m.focus = focusCommits
@@ -530,6 +607,18 @@ func TestRenderSidebar_ShowsFiles(t *testing.T) {
 	}
 }
 
+func TestRenderCommitInput_FocusedHasNoBackgroundFill(t *testing.T) {
+	m := testModel([]FileDiff{
+		{Path: "a.go", Lines: []DiffLine{{Type: LineAdded, NewNum: 1, Content: "pkg a"}}, Added: 1, Staged: true},
+	})
+	m.focus = focusCommitMsg
+
+	got := m.renderCommitInput()
+	if strings.Contains(got, "\x1b[48;") {
+		t.Fatal("focused commit input should not render a textarea background fill")
+	}
+}
+
 // --- renderTreeEntry ---
 
 func TestRenderTreeEntry_Directory(t *testing.T) {
@@ -567,6 +656,24 @@ func TestRenderTreeEntry_UnselectedFile(t *testing.T) {
 	}
 }
 
+func TestHandleCommitClick_SelectsClickedCommitRow(t *testing.T) {
+	m := testModel(twoFiles)
+	m.commits = []CommitInfo{
+		{SHA: "abc1234", FullSHA: "abc1234full", Message: "first"},
+		{SHA: "def5678", FullSHA: "def5678full", Message: "second"},
+	}
+	m.commitOffset = 0
+
+	result, _ := m.handleCommitClick(1)
+	got := result.(model)
+	if got.commitCursor != 1 {
+		t.Fatalf("commitCursor = %d, want 1", got.commitCursor)
+	}
+	if got.selectedCommit != 0 {
+		t.Fatalf("selectedCommit = %d, want 0", got.selectedCommit)
+	}
+}
+
 // --- View ---
 
 func TestView_EmptyWhenNoWidth(t *testing.T) {
@@ -584,6 +691,53 @@ func TestNewModel_HasInitialLayout(t *testing.T) {
 	}
 	if got := m.View(); got == "" {
 		t.Fatal("newModel View should not be empty before the first window size message")
+	}
+}
+
+func TestView_ContainsPaneTitles(t *testing.T) {
+	m := testModel(twoFiles)
+	view := m.View()
+	if !strings.Contains(view, " 1. files ") {
+		t.Fatal("View should include the files pane title")
+	}
+	if !strings.Contains(view, " 2. history ") {
+		t.Fatal("View should include the history pane title")
+	}
+	if !strings.Contains(view, " 3. diff vs HEAD ") {
+		t.Fatal("View should include the diff pane title")
+	}
+}
+
+func TestView_ContainsCommitPaneWhenVisible(t *testing.T) {
+	m := testModel([]FileDiff{
+		{Path: "a.go", Lines: []DiffLine{{Type: LineAdded, NewNum: 1, Content: "pkg a"}}, Added: 1, Staged: true},
+	})
+	view := m.View()
+	if !strings.Contains(view, " 2. commit ") {
+		t.Fatal("View should include the commit pane title when staged changes exist")
+	}
+	if !strings.Contains(view, " 3. history ") {
+		t.Fatal("View should renumber history when commit pane is visible")
+	}
+	if !strings.Contains(view, " 4. diff vs HEAD ") {
+		t.Fatal("View should renumber diff when commit pane is visible")
+	}
+}
+
+func TestPaneTitle_RefMode(t *testing.T) {
+	m := testModel(twoFiles)
+	m.cfg.Ref = "main~1"
+	if got := m.paneTitle(focusDiff); got != " 3. diff vs main~1 " {
+		t.Fatalf("paneTitle(diff) = %q", got)
+	}
+}
+
+func TestPaneTitle_CommitMode(t *testing.T) {
+	m := testModel(twoFiles)
+	m.selectedCommit = 0
+	m.sha = "abc1234"
+	if got := m.paneTitle(focusDiff); got != " 3. diff commit abc1234 " {
+		t.Fatalf("paneTitle(diff) = %q", got)
 	}
 }
 
@@ -611,21 +765,21 @@ func TestHandleKey_Quit_ClosesWatcher(t *testing.T) {
 // --- renderScrollbar ---
 
 func TestRenderScrollbar_NoScrollNeeded(t *testing.T) {
-	result := renderScrollbar(20, 10, 0)
+	result := renderScrollbar(20, 10, 0, false)
 	if result != "" {
 		t.Error("should return empty when content fits")
 	}
 }
 
 func TestRenderScrollbar_ExactFit(t *testing.T) {
-	result := renderScrollbar(20, 20, 0)
+	result := renderScrollbar(20, 20, 0, false)
 	if result != "" {
 		t.Error("should return empty when content exactly fits")
 	}
 }
 
 func TestRenderScrollbar_HasCorrectHeight(t *testing.T) {
-	result := renderScrollbar(10, 50, 0)
+	result := renderScrollbar(10, 50, 0, false)
 	lines := strings.Split(result, "\n")
 	if len(lines) != 10 {
 		t.Errorf("scrollbar height = %d, want 10", len(lines))
@@ -633,10 +787,40 @@ func TestRenderScrollbar_HasCorrectHeight(t *testing.T) {
 }
 
 func TestRenderScrollbar_ThumbMovesWithOffset(t *testing.T) {
-	top := renderScrollbar(20, 100, 0)
-	bottom := renderScrollbar(20, 100, 80)
+	top := renderScrollbar(20, 100, 0, false)
+	bottom := renderScrollbar(20, 100, 80, false)
 	if top == bottom {
 		t.Error("scrollbar should look different at top vs bottom")
+	}
+}
+
+func TestRenderScrollbar_FocusStateChangesStyle(t *testing.T) {
+	inactive := renderScrollbar(12, 100, 20, false)
+	active := renderScrollbar(12, 100, 20, true)
+	if inactive == active {
+		t.Fatal("active scrollbar should render differently from inactive")
+	}
+}
+
+func TestRenderPane_UsesScrollbarOnBorderColumn(t *testing.T) {
+	pane := renderPane(" pane ", "abc\ndef", "█\n", 5, 4, false)
+	lines := strings.Split(stripANSI(pane), "\n")
+	if got := lines[1]; got != "│abc█" {
+		t.Fatalf("first body row = %q, want %q", got, "│abc█")
+	}
+	if got := lines[2]; got != "│def│" {
+		t.Fatalf("second body row = %q, want %q", got, "│def│")
+	}
+}
+
+func TestRenderPane_UsesBorderWhenNoScrollbar(t *testing.T) {
+	pane := renderPane(" pane ", "abc\ndef", "", 5, 4, false)
+	lines := strings.Split(stripANSI(pane), "\n")
+	if got := lines[1]; got != "│abc│" {
+		t.Fatalf("first body row = %q, want %q", got, "│abc│")
+	}
+	if got := lines[2]; got != "│def│" {
+		t.Fatalf("second body row = %q, want %q", got, "│def│")
 	}
 }
 
