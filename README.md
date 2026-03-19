@@ -64,20 +64,17 @@ veer -d                 # enable debug logging to ~/.veer/debug.log
 - [ ] Expandable ellipsis
 - [x] Rethink keybinds
 - [x] Hunk/file staging and committing
-- [ ] Display empty commits
 - [ ] Dynamic sidebar width based on window size
-- [ ] Resizable git history pane
 - [x] Flag to disable syntax highlighting
-- [ ] Fix version flag output (`veer -v` currently prints `dev`)
-- [ ] Fix header truncation
+- [x] Fix version flag output (`veer -v` currently prints `dev`)
+- [x] Fix header truncation
 - [ ] Fix line wrapping
-- [ ] Fix pane borders
+- [x] Fix pane borders
 - [ ] Fix line numbers changing upon file/hunk staging
 - [ ] Add linux to goreleaser
 - [ ] Ensure README matches implementation
 - [ ] Flesh out tests
 - [x] Run go vet in CI
 - [ ] Add GitHub info (issues, discussions, etc.)
-- [ ] Show focus indicator in footer
 - [x] Set up goreleaser
 - [x] Syntax highlighting
