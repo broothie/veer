@@ -77,7 +77,7 @@ bin_dir="$(choose_bin_dir)"
 version_number="${VERSION#v}"
 
 if [ "$VERSION" = "latest" ]; then
-	version_number="$(curl -fsSI -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest" | sed 's#.*/tag/v\{0,1\}##')"
+	version_number="$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest" | sed 's#.*/tag/v\{0,1\}##')"
 fi
 
 [ -n "$version_number" ] || fail "could not determine release version"

@@ -94,6 +94,7 @@ type model struct {
 	lastLogSHA     string    // HEAD SHA at last commit-log fetch; skip Log() when unchanged
 	fileOffsets    []int     // line offset where each file starts in the viewport
 	hunkRefs       []hunkRef // maps viewport lines to file+hunk indices
+	liveResult     *DiffResult
 	commits        []CommitInfo
 	commitCursor   int // 0 = "working tree", 1+ = commits[i-1]
 	commitOffset   int
@@ -266,22 +267,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.commits = msg.commits
 			m.lastLogSHA = msg.headSHA
 		}
-		// Only update file data if in working tree mode.
-		if msg.result != nil && m.selectedCommit == -1 {
-			m.branch = msg.result.Branch
-			m.sha = msg.result.SHA
-			m.message = msg.result.Message
-
-			prevYOffset := m.viewport.YOffset
-
-			m.files = msg.result.Files
-			m.tree = buildTree(m.files)
-
-			m.diffGen++
-			m.rebuildDiffContent()
-
-			m.viewport.SetYOffset(prevYOffset)
-			m.syncCursorToScroll()
+		if msg.result != nil {
+			m.liveResult = msg.result
+			if m.selectedCommit == -1 {
+				m.applyLiveResult(m.viewport.YOffset)
+			}
 		}
 
 		// Re-fetch immediately if changes arrived during this fetch.
@@ -318,12 +308,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.selectedCommit >= 0 && m.selectedCommit < len(m.commits) &&
 			m.commits[m.selectedCommit].FullSHA == msg.sha {
 			m.err = msg.err
-			m.files = msg.files
-			m.tree = buildTree(m.files)
-			m.diffGen++
-			m.rebuildDiffContent()
-			m.viewport.GotoTop()
-			m.syncCursorToScroll()
+			m.applyFiles(msg.files, 0)
 		}
 
 	case tea.KeyMsg:
@@ -413,6 +398,25 @@ func (m *model) rebuildDiffContent() {
 	content := m.buildDiffContent()
 	m.viewport.SetContent(content)
 	m.lastBuiltGen = m.diffGen
+}
+
+func (m *model) applyFiles(files []FileDiff, yOffset int) {
+	m.files = files
+	m.tree = buildTree(m.files)
+	m.diffGen++
+	m.rebuildDiffContent()
+	m.viewport.SetYOffset(yOffset)
+	m.syncCursorToScroll()
+}
+
+func (m *model) applyLiveResult(yOffset int) {
+	if m.liveResult == nil {
+		return
+	}
+	m.branch = m.liveResult.Branch
+	m.sha = m.liveResult.SHA
+	m.message = m.liveResult.Message
+	m.applyFiles(m.liveResult.Files, yOffset)
 }
 
 func (m model) inSidebar() bool {
@@ -800,6 +804,40 @@ func (m *model) diffScroll(fn func(*viewport.Model)) {
 	}
 }
 
+func (m *model) previewCommit(idx int, focusFilesPane bool) tea.Cmd {
+	if idx < 0 || idx >= len(m.commits) {
+		return nil
+	}
+
+	c := m.commits[idx]
+	m.selectedCommit = idx
+	m.branch = ""
+	m.sha = c.SHA
+	m.message = c.Message
+	if focusFilesPane {
+		m.focus = focusFiles
+	}
+	return commitDiffCmd(c.FullSHA)
+}
+
+func (m *model) restoreLiveDiff(focusFilesPane bool) tea.Cmd {
+	if m.selectedCommit != -1 {
+		m.selectedCommit = -1
+	}
+	if focusFilesPane {
+		m.focus = focusFiles
+	}
+	if m.liveResult != nil {
+		m.applyLiveResult(m.viewport.YOffset)
+		return nil
+	}
+	if !m.fetching {
+		m.fetching = true
+		return fetchCmd(m.cfg, m.lastLogSHA)
+	}
+	return nil
+}
+
 func (m model) keyOpen() (tea.Model, tea.Cmd) {
 	switch m.focus {
 	case focusFiles:
@@ -816,47 +854,20 @@ func (m model) keyOpen() (tea.Model, tea.Cmd) {
 // without changing focus. Used for instant preview during j/k/scroll navigation.
 func (m *model) applyCommitCursor() tea.Cmd {
 	if m.commitCursor == 0 {
-		if m.selectedCommit != -1 {
-			m.selectedCommit = -1
-		}
-		return nil
+		return m.restoreLiveDiff(false)
 	}
 	idx := m.commitCursor - 1
-	if idx >= len(m.commits) {
-		return nil
-	}
-	c := m.commits[idx]
-	m.selectedCommit = idx
-	m.branch = ""
-	m.sha = c.SHA
-	m.message = c.Message
-	return commitDiffCmd(c.FullSHA)
+	return m.previewCommit(idx, false)
 }
 
 // selectCommit handles enter in the commit list.
 func (m model) selectCommit() (tea.Model, tea.Cmd) {
 	if m.commitCursor == 0 {
-		// Select "working tree".
-		if m.selectedCommit != -1 {
-			m.selectedCommit = -1
-			m.focus = focusFiles
-			// Working tree data will be refreshed on next tick.
-		}
-		return m, nil
+		return m, m.restoreLiveDiff(true)
 	}
 
 	idx := m.commitCursor - 1
-	if idx >= len(m.commits) {
-		return m, nil
-	}
-
-	c := m.commits[idx]
-	m.selectedCommit = idx
-	m.branch = ""
-	m.sha = c.SHA
-	m.message = c.Message
-	m.focus = focusFiles
-	return m, commitDiffCmd(c.FullSHA)
+	return m, m.previewCommit(idx, true)
 }
 
 func (m model) sidebarBorderX() int {

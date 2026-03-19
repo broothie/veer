@@ -344,6 +344,64 @@ func TestUpdate_DiffResult_ClampsCursor(t *testing.T) {
 	}
 }
 
+func TestApplyCommitCursor_RestoresLiveResultImmediately(t *testing.T) {
+	m := testModel([]FileDiff{
+		{Path: "commit.go", Lines: []DiffLine{{Type: LineAdded, NewNum: 1, Content: "commit"}}, Added: 1},
+	})
+	m.liveResult = &DiffResult{
+		Branch:  "main",
+		SHA:     "live1234",
+		Message: "working tree",
+		Files:   twoFiles,
+	}
+	m.selectedCommit = 0
+	m.commitCursor = 0
+
+	cmd := m.applyCommitCursor()
+	if cmd != nil {
+		t.Fatal("restoring the live result should not need a follow-up command when cached")
+	}
+	if m.selectedCommit != -1 {
+		t.Fatalf("selectedCommit = %d, want -1", m.selectedCommit)
+	}
+	if m.sha != "live1234" {
+		t.Fatalf("sha = %q, want %q", m.sha, "live1234")
+	}
+	if len(m.files) != len(twoFiles) || m.files[0].Path != "a.go" {
+		t.Fatalf("files = %#v, want cached live result", m.files)
+	}
+}
+
+func TestSelectCommit_WorkingTreeRestoresLiveResultAndFocus(t *testing.T) {
+	m := testModel([]FileDiff{
+		{Path: "commit.go", Lines: []DiffLine{{Type: LineAdded, NewNum: 1, Content: "commit"}}, Added: 1},
+	})
+	m.liveResult = &DiffResult{
+		Branch:  "main",
+		SHA:     "live1234",
+		Message: "working tree",
+		Files:   twoFiles,
+	}
+	m.selectedCommit = 0
+	m.commitCursor = 0
+	m.focus = focusCommits
+
+	result, cmd := m.selectCommit()
+	got := result.(model)
+	if cmd != nil {
+		t.Fatal("restoring the live result should not need a follow-up command when cached")
+	}
+	if got.focus != focusFiles {
+		t.Fatalf("focus = %d, want focusFiles", got.focus)
+	}
+	if got.selectedCommit != -1 {
+		t.Fatalf("selectedCommit = %d, want -1", got.selectedCommit)
+	}
+	if len(got.files) != len(twoFiles) || got.files[0].Path != "a.go" {
+		t.Fatalf("files = %#v, want cached live result", got.files)
+	}
+}
+
 // --- Update: tickMsg with fetch guard ---
 
 func TestUpdate_TickMsg_SkipsWhenFetching(t *testing.T) {

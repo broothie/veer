@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -118,44 +118,72 @@ func (g *gitRepo) Status() (map[string]FileChange, error) {
 	root := g.wt.Filesystem.Root()
 	stdout, _, _, err := cob.Output(context.Background(), "git",
 		cob.SetDir(root),
-		cob.AddArgs("status", "--porcelain", "--untracked-files=all"),
+		cob.AddArgs("status", "--porcelain=v1", "--untracked-files=all", "-z"),
 	)
 	if err != nil {
 		debugf("Status: failed: %v", err)
 		return nil, err
 	}
 
+	data, err := io.ReadAll(stdout)
+	if err != nil {
+		debugf("Status: read failed: %v", err)
+		return nil, err
+	}
+
+	changes, err := parseStatusPorcelainZ(data)
+	if err != nil {
+		debugf("Status: parse failed: %v", err)
+		return nil, err
+	}
+
+	debugf("Status: %d changed files", len(changes))
+	return changes, nil
+}
+
+func parseStatusPorcelainZ(data []byte) (map[string]FileChange, error) {
 	changes := make(map[string]FileChange)
-	scanner := bufio.NewScanner(stdout)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if len(line) < 4 {
+
+	for len(data) > 0 {
+		idx := bytes.IndexByte(data, 0)
+		if idx < 0 {
+			return nil, fmt.Errorf("malformed porcelain status: missing NUL terminator")
+		}
+
+		entry := string(data[:idx])
+		data = data[idx+1:]
+		if entry == "" {
 			continue
 		}
-		x, y := line[0], line[1] // x=staging, y=worktree
-		path := line[3:]
-
-		// Porcelain v1 renames: "R  old -> new" — use the destination path.
-		if x == 'R' || x == 'C' {
-			if idx := strings.LastIndex(path, " -> "); idx >= 0 {
-				path = path[idx+4:]
-			}
+		if len(entry) < 4 {
+			continue
 		}
 
-		// Skip ignored files.
+		x, y := entry[0], entry[1]
+		path := entry[3:]
+
+		// Porcelain v1 -z rename/copy records are followed by an extra NUL-delimited
+		// source path. The first path in the entry is the destination path we render.
+		if x == 'R' || x == 'C' {
+			idx = bytes.IndexByte(data, 0)
+			if idx < 0 {
+				return nil, fmt.Errorf("malformed porcelain rename record")
+			}
+			data = data[idx+1:]
+		}
+
 		if x == '!' && y == '!' {
 			continue
 		}
 
-		fc := FileChange{
+		changes[path] = FileChange{
 			Staged:          x != ' ' && x != '?',
-			Unstaged:        y != ' ' || (x == '?' && y == '?'), // untracked = both '?'
+			Unstaged:        y != ' ' || (x == '?' && y == '?'),
 			StagingDeleted:  x == 'D',
 			WorktreeDeleted: y == 'D',
 		}
-		changes[path] = fc
 	}
-	debugf("Status: %d changed files", len(changes))
+
 	return changes, nil
 }
 
