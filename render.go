@@ -281,17 +281,17 @@ func (m model) renderStatus() string {
 	var hint string
 	switch m.focus {
 	case focusFiles:
-		parts := []string{"s: stage", "enter: open", "tab: next", "q: quit"}
+		parts := []string{"1/2/3: panes", "s: stage", "enter: open", "tab: next", "q: quit"}
 		if m.hasStaged() {
 			parts = append([]string{"u: unstage all", "c: commit"}, parts...)
 		}
 		hint = strings.Join(parts, " | ")
 	case focusCommitMsg:
-		hint = "^d: commit | esc: cancel | tab: next"
+		hint = "^d: commit | esc: cancel | 1/2/3: panes | tab: next"
 	case focusCommits:
-		hint = "enter: select | tab: next | q: quit"
+		hint = "1/2/3: panes | enter: select | tab: next | q: quit"
 	case focusDiff:
-		parts := []string{"s: stage hunk", "tab: files", "j/k ↑↓  ^f/^b: page", "q: quit"}
+		parts := []string{"1/2/3: panes", "s: stage hunk", "tab: files", "j/k ↑↓  ^f/^b: page", "q: quit"}
 		hint = strings.Join(parts, " | ")
 	}
 

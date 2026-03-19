@@ -518,6 +518,38 @@ func (m *model) focusCommitMessage() tea.Cmd {
 	return m.commitMsg.Focus()
 }
 
+func (m *model) focusHistoryPane() tea.Cmd {
+	if len(m.commits) > 0 {
+		if m.focus == focusCommitMsg {
+			m.commitMsg.Blur()
+		}
+		m.focus = focusCommits
+		return nil
+	}
+	return m.focusCommitMessage()
+}
+
+func (m *model) focusPane(key string) tea.Cmd {
+	switch key {
+	case "1":
+		if m.focus == focusCommitMsg {
+			m.commitMsg.Blur()
+		}
+		m.focus = focusFiles
+	case "2":
+		return m.focusHistoryPane()
+	case "3":
+		if len(m.files) == 0 {
+			return nil
+		}
+		if m.focus == focusCommitMsg {
+			m.commitMsg.Blur()
+		}
+		m.focus = focusDiff
+	}
+	return nil
+}
+
 func (m model) submitCommit() (tea.Model, tea.Cmd) {
 	msg := strings.TrimSpace(m.commitMsg.Value())
 	if msg == "" || m.repoRoot == "" {
@@ -533,6 +565,8 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Commit message input handles its own keys.
 	if m.focus == focusCommitMsg {
 		switch msg.String() {
+		case "1", "2", "3":
+			return m, m.focusPane(msg.String())
 		case "esc":
 			m.commitMsg.Blur()
 			m.commitMsg.Reset()
@@ -556,6 +590,8 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg.String() {
+	case "1", "2", "3":
+		return m, m.focusPane(msg.String())
 	case "q", "ctrl+c":
 		if m.watcherClose != nil {
 			m.watcherClose()
@@ -975,6 +1011,17 @@ func (m model) commitListHeight() int {
 	return max(h, 3) // at least 3 rows
 }
 
+func (m model) diffPaneTitle() string {
+	switch {
+	case m.selectedCommit >= 0 && m.sha != "":
+		return " 3. diff commit " + m.sha + " "
+	case m.cfg.Ref != "":
+		return " 3. diff vs " + m.cfg.Ref + " "
+	default:
+		return " 3. diff vs HEAD "
+	}
+}
+
 func (m model) View() string {
 	if m.width == 0 {
 		return ""
@@ -1010,7 +1057,7 @@ func (m model) View() string {
 	diffScrollbar := renderScrollbar(diffBodyH, totalDiffLines, m.viewport.YOffset, m.focus == focusDiff)
 
 	fileScrollbar := renderScrollbar(fileH, len(m.tree), m.sidebarOffset, m.focus == focusFiles)
-	filePane := renderPane(" files ", m.renderFileTree(fileH), fileScrollbar, m.sidebarPaneWidth(), fileH+paneBorderSize, m.focus == focusFiles)
+	filePane := renderPane(" 1. files ", m.renderFileTree(fileH), fileScrollbar, m.sidebarPaneWidth(), fileH+paneBorderSize, m.focus == focusFiles)
 
 	commitScrollbar := renderScrollbar(commitH, len(m.commits)+1, m.commitOffset, m.focus == focusCommits)
 	historyScrollbar := commitScrollbar
@@ -1018,9 +1065,9 @@ func (m model) View() string {
 		historyScrollbar = joinOverlay(msgH, commitScrollbar)
 	}
 	historyFocused := m.focus == focusCommitMsg || m.focus == focusCommits
-	historyPane := renderPane(" history ", m.renderHistoryBody(msgH, commitH), historyScrollbar, m.sidebarPaneWidth(), msgH+commitH+paneBorderSize, historyFocused)
+	historyPane := renderPane(" 2. history ", m.renderHistoryBody(msgH, commitH), historyScrollbar, m.sidebarPaneWidth(), msgH+commitH+paneBorderSize, historyFocused)
 
-	diffPane := renderPane(" diff ", content, diffScrollbar, m.width-m.sidebarPaneWidth(), mainH, m.focus == focusDiff)
+	diffPane := renderPane(m.diffPaneTitle(), content, diffScrollbar, m.width-m.sidebarPaneWidth(), mainH, m.focus == focusDiff)
 	sidebarColumn := lipgloss.JoinVertical(lipgloss.Left, filePane, historyPane)
 	main := lipgloss.JoinHorizontal(lipgloss.Top, sidebarColumn, diffPane)
 	status := m.renderStatus()

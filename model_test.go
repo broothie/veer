@@ -160,6 +160,29 @@ func TestHandleKey_Tab_CyclesFocus(t *testing.T) {
 	}
 }
 
+func TestHandleKey_NumberKeysSwitchPanes(t *testing.T) {
+	m := testModel(twoFiles)
+	m.commits = []CommitInfo{{SHA: "abc1234", FullSHA: "abc1234full", Message: "test"}}
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	m = result.(model)
+	if m.focus != focusDiff {
+		t.Fatalf("3 should focus diff, got %d", m.focus)
+	}
+
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	m = result.(model)
+	if m.focus != focusCommits {
+		t.Fatalf("2 should focus history, got %d", m.focus)
+	}
+
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	m = result.(model)
+	if m.focus != focusFiles {
+		t.Fatalf("1 should focus files, got %d", m.focus)
+	}
+}
+
 func TestHandleKey_ShiftTab_CyclesBackward(t *testing.T) {
 	m := testModel(twoFiles)
 	m.commits = []CommitInfo{{SHA: "abc1234", FullSHA: "abc1234full", Message: "test"}}
@@ -397,6 +420,9 @@ func TestRenderStatus_FocusHints(t *testing.T) {
 	if !strings.Contains(status, "s: stage") {
 		t.Error("file-focused status should show stage hint")
 	}
+	if !strings.Contains(status, "1/2/3: panes") {
+		t.Error("status should show number pane-switch hints")
+	}
 	if !strings.Contains(status, "|") {
 		t.Error("status should use pipe separators")
 	}
@@ -621,14 +647,31 @@ func TestNewModel_HasInitialLayout(t *testing.T) {
 func TestView_ContainsPaneTitles(t *testing.T) {
 	m := testModel(twoFiles)
 	view := m.View()
-	if !strings.Contains(view, " files ") {
+	if !strings.Contains(view, " 1. files ") {
 		t.Fatal("View should include the files pane title")
 	}
-	if !strings.Contains(view, " history ") {
+	if !strings.Contains(view, " 2. history ") {
 		t.Fatal("View should include the history pane title")
 	}
-	if !strings.Contains(view, " diff ") {
+	if !strings.Contains(view, " 3. diff vs HEAD ") {
 		t.Fatal("View should include the diff pane title")
+	}
+}
+
+func TestDiffPaneTitle_RefMode(t *testing.T) {
+	m := testModel(twoFiles)
+	m.cfg.Ref = "main~1"
+	if got := m.diffPaneTitle(); got != " 3. diff vs main~1 " {
+		t.Fatalf("diffPaneTitle() = %q", got)
+	}
+}
+
+func TestDiffPaneTitle_CommitMode(t *testing.T) {
+	m := testModel(twoFiles)
+	m.selectedCommit = 0
+	m.sha = "abc1234"
+	if got := m.diffPaneTitle(); got != " 3. diff commit abc1234 " {
+		t.Fatalf("diffPaneTitle() = %q", got)
 	}
 }
 
