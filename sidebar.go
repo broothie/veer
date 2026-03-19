@@ -17,33 +17,24 @@ type treeEntry struct {
 }
 
 func (m model) renderSidebar(height int) string {
-	fileH, msgH, _ := m.sidebarSplit()
-	commitH := height - fileH - msgH
-
-	// File tree section.
-	fileSection := m.renderFileTree(fileH)
-
+	fileH, msgH, commitH := m.sidebarSplit()
 	lines := make([]string, 0, height)
 
-	// File tree lines.
-	fileLines := strings.Split(fileSection, "\n")
+	fileLines := strings.Split(m.renderFileTree(fileH), "\n")
 	lines = append(lines, fileLines...)
 	for len(lines) < fileH {
 		lines = append(lines, "")
 	}
 
-	// Commit message section.
 	if msgH > 0 {
-		msgLines := m.renderCommitInput()
+		msgLines := strings.Split(m.renderCommitInput(), "\n")
 		lines = append(lines, msgLines...)
 		for len(lines) < fileH+msgH {
 			lines = append(lines, "")
 		}
 	}
 
-	// Commit list section.
-	commitSection := m.renderCommitList(commitH)
-	commitLines := strings.Split(commitSection, "\n")
+	commitLines := strings.Split(m.renderHistoryBody(commitH), "\n")
 	lines = append(lines, commitLines...)
 	for len(lines) < height {
 		lines = append(lines, "")
@@ -55,57 +46,39 @@ func (m model) renderSidebar(height int) string {
 		Render(strings.Join(lines[:height], "\n"))
 }
 
-func (m model) renderHistoryBody(msgH, commitH int) string {
-	lines := make([]string, 0, msgH+commitH)
-
-	if msgH > 0 {
-		msgLines := m.renderCommitInput()
-		lines = append(lines, msgLines...)
-		for len(lines) < msgH {
-			lines = append(lines, "")
-		}
-	}
-
+func (m model) renderHistoryBody(commitH int) string {
+	lines := make([]string, 0, commitH)
 	commitSection := m.renderCommitList(commitH)
 	commitLines := strings.Split(commitSection, "\n")
 	lines = append(lines, commitLines...)
-	for len(lines) < msgH+commitH {
+	for len(lines) < commitH {
 		lines = append(lines, "")
 	}
 
 	return styleSidebar.
 		Width(m.sidebarWidth).
-		Height(msgH + commitH).
-		Render(strings.Join(lines[:msgH+commitH], "\n"))
+		Height(commitH).
+		Render(strings.Join(lines[:commitH], "\n"))
 }
 
-func (m model) renderCommitInput() []string {
-	label := " commit "
-	lineWidth := m.sidebarWidth - lipgloss.Width(label)
-	if lineWidth < 0 {
-		lineWidth = 0
-	}
-	header := styleFaint.Render(label + strings.Repeat("─", lineWidth))
-
+func (m model) renderCommitInput() string {
 	if m.focus == focusCommitMsg {
 		m.commitMsg.SetWidth(m.sidebarWidth)
 		view := m.commitMsg.View()
 		viewLines := strings.Split(view, "\n")
-		result := []string{header}
-		result = append(result, viewLines...)
-		// Pad to exactly 3 input lines.
-		for len(result) < 4 {
+		result := append([]string(nil), viewLines...)
+		for len(result) < 3 {
 			result = append(result, "")
 		}
-		return result[:4]
+		return strings.Join(result[:3], "\n")
 	}
 
-	return []string{
-		header,
+	lines := []string{
 		styleFaint.Render(" c: type message"),
 		"",
 		"",
 	}
+	return strings.Join(lines, "\n")
 }
 
 func (m model) renderFileTree(height int) string {

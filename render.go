@@ -61,21 +61,6 @@ func renderScrollbar(height, total, offset int, active bool) string {
 	return sb.String()
 }
 
-func joinOverlay(topHeight int, overlay string) string {
-	if topHeight <= 0 {
-		return overlay
-	}
-
-	lines := make([]string, 0, topHeight)
-	for range topHeight {
-		lines = append(lines, "")
-	}
-	if overlay != "" {
-		lines = append(lines, strings.Split(overlay, "\n")...)
-	}
-	return strings.Join(lines, "\n")
-}
-
 func (m model) renderHeader() string {
 	sep := " | "
 
@@ -279,19 +264,20 @@ func (m model) renderStatus() string {
 	}
 
 	var hint string
+	paneHint := m.paneShortcutHint()
 	switch m.focus {
 	case focusFiles:
-		parts := []string{"1/2/3: panes", "s: stage", "enter: open", "tab: next", "q: quit"}
+		parts := []string{paneHint, "s: stage", "enter: open", "tab: next", "q: quit"}
 		if m.hasStaged() {
 			parts = append([]string{"u: unstage all", "c: commit"}, parts...)
 		}
 		hint = strings.Join(parts, " | ")
 	case focusCommitMsg:
-		hint = "^d: commit | esc: cancel | 1/2/3: panes | tab: next"
+		hint = "^d: commit | esc: cancel | " + paneHint + " | tab: next"
 	case focusCommits:
-		hint = "1/2/3: panes | enter: select | tab: next | q: quit"
+		hint = paneHint + " | enter: select | tab: next | q: quit"
 	case focusDiff:
-		parts := []string{"1/2/3: panes", "s: stage hunk", "tab: files", "j/k ↑↓  ^f/^b: page", "q: quit"}
+		parts := []string{paneHint, "s: stage hunk", "tab: files", "j/k ↑↓  ^f/^b: page", "q: quit"}
 		hint = strings.Join(parts, " | ")
 	}
 

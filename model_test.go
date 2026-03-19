@@ -183,6 +183,31 @@ func TestHandleKey_NumberKeysSwitchPanes(t *testing.T) {
 	}
 }
 
+func TestHandleKey_NumberKeysSwitchPanes_WithCommitPane(t *testing.T) {
+	m := testModel([]FileDiff{
+		{Path: "a.go", Lines: []DiffLine{{Type: LineAdded, NewNum: 1, Content: "pkg a"}}, Added: 1, Staged: true},
+	})
+	m.commits = []CommitInfo{{SHA: "abc1234", FullSHA: "abc1234full", Message: "test"}}
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	m = result.(model)
+	if m.focus != focusCommitMsg {
+		t.Fatalf("2 should focus commit pane when visible, got %d", m.focus)
+	}
+
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	m = result.(model)
+	if m.focus != focusCommits {
+		t.Fatalf("3 should focus history when commit pane visible, got %d", m.focus)
+	}
+
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	m = result.(model)
+	if m.focus != focusDiff {
+		t.Fatalf("4 should focus diff when commit pane visible, got %d", m.focus)
+	}
+}
+
 func TestHandleKey_ShiftTab_CyclesBackward(t *testing.T) {
 	m := testModel(twoFiles)
 	m.commits = []CommitInfo{{SHA: "abc1234", FullSHA: "abc1234full", Message: "test"}}
@@ -214,11 +239,11 @@ func TestHandleKey_Tab_SkipsCommitsWhenEmpty(t *testing.T) {
 	m := testModel(twoFiles)
 	m.focus = focusFiles
 
-	// No commits: files -> diff (skip commits)
+	// With no log commits, history pane still exists via HEAD entry.
 	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m = result.(model)
-	if m.focus != focusDiff {
-		t.Errorf("tab with no commits: focus = %d, want focusDiff", m.focus)
+	if m.focus != focusCommits {
+		t.Errorf("tab with no commits: focus = %d, want focusCommits", m.focus)
 	}
 }
 
@@ -252,8 +277,8 @@ func TestHandleKey_ShiftTab_DiffToFiles(t *testing.T) {
 
 	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
 	m = result.(model)
-	if m.focus != focusFiles {
-		t.Error("shift+tab from diff (no commits) should switch focus to files")
+	if m.focus != focusCommits {
+		t.Error("shift+tab from diff should switch focus to history")
 	}
 }
 
@@ -658,20 +683,36 @@ func TestView_ContainsPaneTitles(t *testing.T) {
 	}
 }
 
-func TestDiffPaneTitle_RefMode(t *testing.T) {
-	m := testModel(twoFiles)
-	m.cfg.Ref = "main~1"
-	if got := m.diffPaneTitle(); got != " 3. diff vs main~1 " {
-		t.Fatalf("diffPaneTitle() = %q", got)
+func TestView_ContainsCommitPaneWhenVisible(t *testing.T) {
+	m := testModel([]FileDiff{
+		{Path: "a.go", Lines: []DiffLine{{Type: LineAdded, NewNum: 1, Content: "pkg a"}}, Added: 1, Staged: true},
+	})
+	view := m.View()
+	if !strings.Contains(view, " 2. commit ") {
+		t.Fatal("View should include the commit pane title when staged changes exist")
+	}
+	if !strings.Contains(view, " 3. history ") {
+		t.Fatal("View should renumber history when commit pane is visible")
+	}
+	if !strings.Contains(view, " 4. diff vs HEAD ") {
+		t.Fatal("View should renumber diff when commit pane is visible")
 	}
 }
 
-func TestDiffPaneTitle_CommitMode(t *testing.T) {
+func TestPaneTitle_RefMode(t *testing.T) {
+	m := testModel(twoFiles)
+	m.cfg.Ref = "main~1"
+	if got := m.paneTitle(focusDiff); got != " 3. diff vs main~1 " {
+		t.Fatalf("paneTitle(diff) = %q", got)
+	}
+}
+
+func TestPaneTitle_CommitMode(t *testing.T) {
 	m := testModel(twoFiles)
 	m.selectedCommit = 0
 	m.sha = "abc1234"
-	if got := m.diffPaneTitle(); got != " 3. diff commit abc1234 " {
-		t.Fatalf("diffPaneTitle() = %q", got)
+	if got := m.paneTitle(focusDiff); got != " 3. diff commit abc1234 " {
+		t.Fatalf("paneTitle(diff) = %q", got)
 	}
 }
 
