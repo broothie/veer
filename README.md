@@ -34,6 +34,42 @@ brew install broothie/tap/veer
 go install github.com/broothie/veer@latest
 ```
 
+### Script
+
+Install the latest release with a convenience script:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/broothie/veer/main/scripts/install.sh | sh
+```
+
+You can override the version or install directory:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/broothie/veer/main/scripts/install.sh | VERSION=v0.1.5 BIN_DIR="$HOME/.local/bin" sh
+```
+
+### Linux tarball
+
+Download the latest release for your architecture and install it into `/usr/local/bin`:
+
+```bash
+VERSION=v0.1.5
+ARCH="$(uname -m)"
+
+case "$ARCH" in
+  x86_64) ARCH=amd64 ;;
+  aarch64|arm64) ARCH=arm64 ;;
+  *) echo "unsupported architecture: $ARCH" >&2; exit 1 ;;
+esac
+
+curl -fsSL -o /tmp/veer.tar.gz \
+  "https://github.com/broothie/veer/releases/download/${VERSION}/veer_${VERSION#v}_linux_${ARCH}.tar.gz"
+tar -xzf /tmp/veer.tar.gz -C /tmp
+sudo install /tmp/veer /usr/local/bin/veer
+```
+
+Replace `VERSION` with the release tag you want to install.
+
 ## Usage
 
 ```
