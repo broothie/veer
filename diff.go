@@ -1,13 +1,16 @@
 package main
 
 import (
-	"fmt"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/pmezard/go-difflib/difflib"
 )
+
+var hunkHeaderRE = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@`)
 
 // LineType classifies a line in a diff.
 type LineType int
@@ -281,8 +284,8 @@ func parseUnifiedDiff(rawLines []string) ([]DiffLine, []Hunk, int, int, error) {
 			curHunkHeader = raw
 			curHunkRaw = []string{raw}
 
-			var os, oc, ns, nc int
-			if _, err := fmt.Sscanf(raw, "@@ -%d,%d +%d,%d @@", &os, &oc, &ns, &nc); err != nil {
+			os, ns, ok := parseHunkHeaderStarts(raw)
+			if !ok {
 				continue
 			}
 			oldNum = os
@@ -331,6 +334,23 @@ func parseUnifiedDiff(rawLines []string) ([]DiffLine, []Hunk, int, int, error) {
 	}
 
 	return lines, hunks, added, removed, nil
+}
+
+func parseHunkHeaderStarts(raw string) (oldStart, newStart int, ok bool) {
+	match := hunkHeaderRE.FindStringSubmatch(raw)
+	if match == nil {
+		return 0, 0, false
+	}
+
+	oldStart, err := strconv.Atoi(match[1])
+	if err != nil {
+		return 0, 0, false
+	}
+	newStart, err = strconv.Atoi(match[3])
+	if err != nil {
+		return 0, 0, false
+	}
+	return oldStart, newStart, true
 }
 
 // matchesFilters returns true if path is under any of the filter prefixes,

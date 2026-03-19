@@ -182,6 +182,38 @@ func TestGitRepoStatus_IgnoresGitignored(t *testing.T) {
 	}
 }
 
+func TestParseStatusPorcelainZ_PreservesLiteralPath(t *testing.T) {
+	changes, err := parseStatusPorcelainZ([]byte("?? dir with spaces/file -> name.txt\x00"))
+	if err != nil {
+		t.Fatalf("parseStatusPorcelainZ: %v", err)
+	}
+
+	fc, ok := changes["dir with spaces/file -> name.txt"]
+	if !ok {
+		t.Fatalf("expected literal path key, got %v", changes)
+	}
+	if fc.Staged {
+		t.Fatal("untracked file should not be staged")
+	}
+	if !fc.Unstaged {
+		t.Fatal("untracked file should be unstaged")
+	}
+}
+
+func TestParseStatusPorcelainZ_RenameUsesDestinationPath(t *testing.T) {
+	changes, err := parseStatusPorcelainZ([]byte("R  new name.txt\x00old -> name.txt\x00"))
+	if err != nil {
+		t.Fatalf("parseStatusPorcelainZ: %v", err)
+	}
+
+	if _, ok := changes["new name.txt"]; !ok {
+		t.Fatalf("expected destination path key, got %v", changes)
+	}
+	if _, ok := changes["old -> name.txt"]; ok {
+		t.Fatalf("old rename path should not be rendered, got %v", changes)
+	}
+}
+
 func TestOpenRepo_ReopensWhenWorkingDirectoryChanges(t *testing.T) {
 	dir1 := initTestRepo(t)
 	dir2 := initTestRepo(t)

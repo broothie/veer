@@ -410,6 +410,33 @@ func TestParseUnifiedDiff_MultipleHunks(t *testing.T) {
 	}
 }
 
+func TestParseUnifiedDiff_SingleLineHunkHeader(t *testing.T) {
+	raw := []string{
+		"--- a/file.txt",
+		"+++ b/file.txt",
+		"@@ -2 +2 @@",
+		"-old",
+		"+new",
+	}
+
+	lines, hunks, added, removed, err := parseUnifiedDiff(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hunks) != 1 {
+		t.Fatalf("got %d hunks, want 1", len(hunks))
+	}
+	if len(lines) != 2 {
+		t.Fatalf("got %d lines, want 2", len(lines))
+	}
+	if added != 1 || removed != 1 {
+		t.Fatalf("added=%d removed=%d, want 1,1", added, removed)
+	}
+	if lines[0].OldNum != 2 || lines[1].NewNum != 2 {
+		t.Fatalf("line numbers = old:%d new:%d, want 2 and 2", lines[0].OldNum, lines[1].NewNum)
+	}
+}
+
 func TestBuildDiffLines(t *testing.T) {
 	old := "aaa\nbbb\nccc\n"
 	new := "aaa\nBBB\nccc\n"

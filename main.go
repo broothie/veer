@@ -120,12 +120,11 @@ func gitVersion() string {
 		return version
 	}
 
-	modified := false
-	if _, err := runGit("diff", "--quiet", "HEAD", "--"); err != nil {
-		// git diff --quiet exits non-zero when the worktree is dirty.
-		modified = true
+	status, err := runGit("status", "--porcelain", "--untracked-files=normal")
+	if err != nil {
+		return revision
 	}
-	if modified {
+	if status != "" {
 		return revision + "-dirty"
 	}
 	return revision

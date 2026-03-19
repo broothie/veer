@@ -98,6 +98,7 @@ veer -d                 # enable debug logging to ~/.veer/debug.log
 - [x] Continuous scroll
 - [x] Refactor everything
 - [ ] Expandable ellipsis
+- [ ] Sticky file headers
 - [x] Rethink keybinds
 - [x] Hunk/file staging and committing
 - [ ] Dynamic sidebar width based on window size
@@ -107,7 +108,7 @@ veer -d                 # enable debug logging to ~/.veer/debug.log
 - [ ] Fix line wrapping
 - [x] Fix pane borders
 - [ ] Fix line numbers changing upon file/hunk staging
-- [ ] Add linux to goreleaser
+- [x] Add linux to goreleaser
 - [ ] Ensure README matches implementation
 - [ ] Flesh out tests
 - [x] Run go vet in CI

@@ -142,3 +142,30 @@ func TestCurrentVersion_FallsBackToGitWhenBuildInfoMissing(t *testing.T) {
 		t.Fatalf("currentVersion() = %q, want %q", got, "abc1234")
 	}
 }
+
+func TestCurrentVersion_GitFallbackMarksUntrackedDirty(t *testing.T) {
+	oldVersion := version
+	oldRead := readBuildInfo
+	oldRunGit := runGit
+	t.Cleanup(func() {
+		version = oldVersion
+		readBuildInfo = oldRead
+		runGit = oldRunGit
+	})
+
+	version = "dev"
+	readBuildInfo = func() (*debug.BuildInfo, bool) { return nil, false }
+	runGit = func(args ...string) (string, error) {
+		if len(args) >= 2 && args[0] == "rev-parse" {
+			return "abc1234", nil
+		}
+		if len(args) >= 2 && args[0] == "status" {
+			return "?? scripts/install.sh", nil
+		}
+		return "", nil
+	}
+
+	if got := currentVersion(); got != "abc1234-dirty" {
+		t.Fatalf("currentVersion() = %q, want %q", got, "abc1234-dirty")
+	}
+}
