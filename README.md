@@ -76,7 +76,7 @@ veer -d                 # enable debug logging to ~/.veer/debug.log
 - [ ] Add linux to goreleaser
 - [ ] Ensure README matches implementation
 - [ ] Flesh out tests
-- [ ] Run go vet in CI
+- [x] Run go vet in CI
 - [ ] Add GitHub info (issues, discussions, etc.)
 - [ ] Show focus indicator in footer
 - [x] Set up goreleaser
