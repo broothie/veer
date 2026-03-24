@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/pmezard/go-difflib/difflib"
 )
@@ -21,6 +22,7 @@ const (
 	LineRemoved
 	LineSeparator
 	LineHeader // section header (e.g., "staged", "unstaged")
+	LineBinary
 )
 
 // DiffLine is a single rendered line in a diff, carrying line numbers.
@@ -243,6 +245,10 @@ func fetchRefDiff(repo Repo, cfg config, result *DiffResult) (*DiffResult, error
 
 // buildDiffLines computes a unified diff and parses it into structured DiffLines and Hunks.
 func buildDiffLines(path, old, new string, context int) ([]DiffLine, []Hunk, int, int, error) {
+	if isBinaryContent(old) || isBinaryContent(new) {
+		return []DiffLine{{Type: LineBinary, Content: "binary file changed"}}, nil, 0, 0, nil
+	}
+
 	ud := difflib.UnifiedDiff{
 		A:        difflib.SplitLines(old),
 		B:        difflib.SplitLines(new),
@@ -256,6 +262,10 @@ func buildDiffLines(path, old, new string, context int) ([]DiffLine, []Hunk, int
 	}
 	rawLines := strings.Split(strings.TrimRight(text, "\n"), "\n")
 	return parseUnifiedDiff(rawLines)
+}
+
+func isBinaryContent(s string) bool {
+	return strings.IndexByte(s, 0) >= 0 || !utf8.ValidString(s)
 }
 
 // parseUnifiedDiff converts raw unified diff lines into structured DiffLines

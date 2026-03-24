@@ -44,7 +44,7 @@ func highlightFile(filename string, lines []DiffLine) []highlightedLine {
 	// Build full text from all content lines.
 	var fullText strings.Builder
 	for _, dl := range lines {
-		if dl.Type == LineSeparator || dl.Type == LineHeader {
+		if dl.Type == LineSeparator || dl.Type == LineHeader || dl.Type == LineBinary {
 			continue
 		}
 		fullText.WriteString(dl.Content)
@@ -58,7 +58,7 @@ func highlightFile(filename string, lines []DiffLine) []highlightedLine {
 
 	// Map tokens back to diff lines.
 	lineIdx := 0
-	for lineIdx < len(lines) && (lines[lineIdx].Type == LineSeparator || lines[lineIdx].Type == LineHeader) {
+	for lineIdx < len(lines) && (lines[lineIdx].Type == LineSeparator || lines[lineIdx].Type == LineHeader || lines[lineIdx].Type == LineBinary) {
 		lineIdx++
 	}
 
@@ -71,7 +71,7 @@ func highlightFile(filename string, lines []DiffLine) []highlightedLine {
 		for pi, part := range parts {
 			if pi > 0 {
 				lineIdx++
-				for lineIdx < len(lines) && (lines[lineIdx].Type == LineSeparator || lines[lineIdx].Type == LineHeader) {
+				for lineIdx < len(lines) && (lines[lineIdx].Type == LineSeparator || lines[lineIdx].Type == LineHeader || lines[lineIdx].Type == LineBinary) {
 					lineIdx++
 				}
 				if lineIdx >= len(lines) {
