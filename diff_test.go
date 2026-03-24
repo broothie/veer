@@ -118,6 +118,33 @@ func TestFetchDiff_UnstagedModified(t *testing.T) {
 	}
 }
 
+func TestFetchDiff_BinaryFileShowsPlaceholder(t *testing.T) {
+	repo := &fakeRepo{
+		head:     HeadInfo{Branch: "main", SHA: "abc1234", Message: "init"},
+		files:    map[string]FileChange{"demo.gif": {Unstaged: true}},
+		worktree: map[string]string{"demo.gif": "GIF89a\x00\x01\x02"},
+	}
+
+	result, err := fetchDiff(repo, config{Context: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result.Files) != 1 {
+		t.Fatalf("got %d files, want 1", len(result.Files))
+	}
+	if len(result.Files[0].Lines) != 1 {
+		t.Fatalf("got %d lines, want 1", len(result.Files[0].Lines))
+	}
+	line := result.Files[0].Lines[0]
+	if line.Type != LineBinary {
+		t.Fatalf("line type = %v, want LineBinary", line.Type)
+	}
+	if line.Content != "binary file changed" {
+		t.Fatalf("line content = %q, want binary placeholder", line.Content)
+	}
+}
+
 func TestFetchDiff_StagedFile(t *testing.T) {
 	repo := &fakeRepo{
 		head:  HeadInfo{Branch: "main", SHA: "abc1234", Message: "init"},
@@ -463,6 +490,22 @@ func TestBuildDiffLines_Identical(t *testing.T) {
 	}
 	if len(lines) != 0 {
 		t.Errorf("got %d lines for identical content, want 0", len(lines))
+	}
+}
+
+func TestBuildDiffLines_BinaryPlaceholder(t *testing.T) {
+	lines, hunks, added, removed, err := buildDiffLines("demo.gif", "", "GIF89a\x00\x01", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hunks) != 0 {
+		t.Fatalf("got %d hunks, want 0", len(hunks))
+	}
+	if added != 0 || removed != 0 {
+		t.Fatalf("added=%d removed=%d, want 0,0", added, removed)
+	}
+	if len(lines) != 1 || lines[0].Type != LineBinary {
+		t.Fatalf("lines = %#v, want single binary placeholder", lines)
 	}
 }
 

@@ -241,6 +241,8 @@ func renderDiffLine(dl DiffLine, numWidth int, hl highlightedLine, section strin
 		return indicator + styleGutter.Render(fmt.Sprintf(" %*d - ", numWidth, dl.OldNum)) + renderHighlightedWithBG(hl, dl.Content, lipgloss.Color("52"))
 	case LineHeader:
 		return styleGutter.Render(fmt.Sprintf("  %*s   ", numWidth, "…"))
+	case LineBinary:
+		return indicator + styleGutter.Render(fmt.Sprintf(" %*s   ", numWidth, "")) + styleFaint.Render(dl.Content)
 	default:
 		return ""
 	}
