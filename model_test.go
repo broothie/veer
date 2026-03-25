@@ -142,6 +142,50 @@ func TestHandleKey_HL_DiffHorizontalScroll(t *testing.T) {
 	}
 }
 
+func TestHandleKey_S_StagesFileInFilesFocus(t *testing.T) {
+	files := []FileDiff{
+		{Path: "a.go", Lines: []DiffLine{{Type: LineAdded, NewNum: 1, Content: "x"}}, Added: 1, Unstaged: true},
+	}
+	m := testModel(files)
+	m.repoRoot = "/tmp/repo"
+	m.focus = focusFiles
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	if cmd == nil {
+		t.Fatal("s should stage/unstage the selected file in files focus")
+	}
+}
+
+func TestHandleKey_S_NoOpInDiffFocus(t *testing.T) {
+	files := []FileDiff{
+		{
+			Path: "a.go",
+			Lines: []DiffLine{
+				{Type: LineAdded, NewNum: 1, Content: "x"},
+			},
+			Hunks: []Hunk{
+				{
+					Header:   "@@ -0,0 +1 @@",
+					RawLines: []string{"@@ -0,0 +1 @@", "+x"},
+					Section:  "unstaged",
+				},
+			},
+			Added:    1,
+			Unstaged: true,
+		},
+	}
+	m := testModel(files)
+	m.repoRoot = "/tmp/repo"
+	m.focus = focusDiff
+	m.diffGen++
+	m.rebuildDiffContent()
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	if cmd != nil {
+		t.Fatal("s should be disabled in diff focus")
+	}
+}
+
 func TestHandleMouse_WheelRight_DiffHorizontalScroll(t *testing.T) {
 	files := []FileDiff{
 		{Path: "a.go", Lines: []DiffLine{{Type: LineAdded, NewNum: 1, Content: strings.Repeat("x", 200)}}, Added: 1, Unstaged: true},
@@ -612,8 +656,11 @@ func TestRenderStatus_FocusHints(t *testing.T) {
 
 	m.focus = focusDiff
 	status = m.renderStatus()
-	if !strings.Contains(status, "s: stage hunk") {
-		t.Error("diff-focused status should show hunk stage hint")
+	if strings.Contains(status, "s: stage hunk") {
+		t.Error("diff-focused status should not show stage hunk shortcut")
+	}
+	if !strings.Contains(status, "scroll: h/l") {
+		t.Error("diff-focused status should show grouped scroll hints")
 	}
 }
 
