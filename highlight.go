@@ -47,7 +47,7 @@ func highlightFile(filename string, lines []DiffLine) []highlightedLine {
 		if dl.Type == LineSeparator || dl.Type == LineHeader || dl.Type == LineBinary {
 			continue
 		}
-		fullText.WriteString(dl.Content)
+		fullText.WriteString(normalizeLineContent(dl.Content))
 		fullText.WriteByte('\n')
 	}
 

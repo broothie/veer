@@ -116,6 +116,87 @@ func TestHandleKey_JK_SidebarNavigation(t *testing.T) {
 	}
 }
 
+func TestHandleKey_HL_DiffHorizontalScroll(t *testing.T) {
+	files := []FileDiff{
+		{Path: "a.go", Lines: []DiffLine{{Type: LineAdded, NewNum: 1, Content: strings.Repeat("x", 200)}}, Added: 1, Unstaged: true},
+	}
+	m := testModel(files)
+	m.width = 60
+	m.recalcLayout()
+	m.focus = focusDiff
+
+	if m.maxDiffXOffset == 0 {
+		t.Fatal("expected long line to allow horizontal scrolling")
+	}
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	m = result.(model)
+	if m.diffXOffset == 0 {
+		t.Fatal("l should increase horizontal offset in diff focus")
+	}
+
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	m = result.(model)
+	if m.diffXOffset != 0 {
+		t.Fatalf("h should decrease horizontal offset to 0, got %d", m.diffXOffset)
+	}
+}
+
+func TestHandleMouse_WheelRight_DiffHorizontalScroll(t *testing.T) {
+	files := []FileDiff{
+		{Path: "a.go", Lines: []DiffLine{{Type: LineAdded, NewNum: 1, Content: strings.Repeat("x", 200)}}, Added: 1, Unstaged: true},
+	}
+	m := testModel(files)
+	m.width = 60
+	m.recalcLayout()
+	m.focus = focusFiles
+	start := m.diffXOffset
+
+	msg := tea.MouseMsg{
+		Button: tea.MouseButtonWheelRight,
+		Action: tea.MouseActionPress,
+		X:      m.sidebarPaneWidth() + 1,
+		Y:      headerHeight + 2,
+	}
+	result, _ := m.Update(msg)
+	m = result.(model)
+
+	if m.focus != focusDiff {
+		t.Fatalf("wheel-right in diff pane should focus diff, got %d", m.focus)
+	}
+	if m.diffXOffset <= start {
+		t.Fatalf("wheel-right should increase horizontal offset, start %d got %d", start, m.diffXOffset)
+	}
+}
+
+func TestHandleMouse_ShiftWheelDown_DiffHorizontalScroll(t *testing.T) {
+	files := []FileDiff{
+		{Path: "a.go", Lines: []DiffLine{{Type: LineAdded, NewNum: 1, Content: strings.Repeat("x", 200)}}, Added: 1, Unstaged: true},
+	}
+	m := testModel(files)
+	m.width = 60
+	m.recalcLayout()
+	m.focus = focusFiles
+	start := m.diffXOffset
+
+	msg := tea.MouseMsg{
+		Button: tea.MouseButtonWheelDown,
+		Action: tea.MouseActionPress,
+		Shift:  true,
+		X:      m.sidebarPaneWidth() + 1,
+		Y:      headerHeight + 2,
+	}
+	result, _ := m.Update(msg)
+	m = result.(model)
+
+	if m.focus != focusDiff {
+		t.Fatalf("shift+wheel-down in diff pane should focus diff, got %d", m.focus)
+	}
+	if m.diffXOffset <= start {
+		t.Fatalf("shift+wheel-down should increase horizontal offset, start %d got %d", start, m.diffXOffset)
+	}
+}
+
 func TestHandleKey_G_FirstLast(t *testing.T) {
 	m := testModel(twoFiles)
 	m.focus = focusFiles
@@ -565,6 +646,54 @@ func TestBuildDiffContent_AllFilesRendered(t *testing.T) {
 	}
 }
 
+func TestBuildDiffContent_DoesNotWrapLongDiffLines(t *testing.T) {
+	long := "abcdefghijklmnopqrstuvwxyz"
+	files := []FileDiff{
+		{
+			Path:     "long.go",
+			Lines:    []DiffLine{{Type: LineAdded, NewNum: 1, Content: long}},
+			Added:    1,
+			Unstaged: true,
+		},
+	}
+	m := testModel(files)
+	m.width = 60 // narrow diff pane
+
+	content := stripANSI(m.buildDiffContent())
+	lines := strings.Split(strings.TrimSuffix(content, "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("long lines should stay single-row with horizontal scroll, got %d lines", len(lines))
+	}
+}
+
+func TestBuildDiffContent_LongLineStillMapsToHunk(t *testing.T) {
+	long := "abcdefghijklmnopqrstuvwxyz"
+	files := []FileDiff{
+		{
+			Path:     "long.go",
+			Lines:    []DiffLine{{Type: LineAdded, NewNum: 1, Content: long}},
+			Added:    1,
+			Unstaged: true,
+		},
+	}
+	m := testModel(files)
+	m.width = 60
+
+	content := stripANSI(m.buildDiffContent())
+	lines := strings.Split(strings.TrimSuffix(content, "\n"), "\n")
+	if len(m.hunkRefs) != len(lines) {
+		t.Fatalf("hunkRefs len = %d, want %d", len(m.hunkRefs), len(lines))
+	}
+
+	if len(m.hunkRefs) != 2 {
+		t.Fatalf("expected file header + one content line, got %d refs", len(m.hunkRefs))
+	}
+	ref := m.hunkRefs[1]
+	if ref.fileIdx != 0 || ref.hunkIdx != 0 {
+		t.Fatalf("hunkRefs[1] = (%d,%d), want (0,0)", ref.fileIdx, ref.hunkIdx)
+	}
+}
+
 func TestRenderHighlighted_Disabled(t *testing.T) {
 	line := DiffLine{Type: LineContext, NewNum: 1, Content: "package main"}
 
@@ -602,11 +731,52 @@ func TestRenderDiffLine_AllTypes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := renderDiffLine(tt.dl, 3, highlightedLine{}, "")
+			result := renderDiffLine(tt.dl, 3, highlightedLine{}, "", 0, 40)
 			if !strings.Contains(result, tt.want) {
 				t.Errorf("renderDiffLine(%s) = %q, should contain %q", tt.name, result, tt.want)
 			}
 		})
+	}
+}
+
+func TestRenderDiffLine_HorizontalClipping(t *testing.T) {
+	dl := DiffLine{Type: LineAdded, NewNum: 1, Content: "abcdefghijklmnopqrstuvwxyz"}
+
+	lineA := stripANSI(renderDiffLine(dl, 3, highlightedLine{}, "unstaged", 0, 10))
+	lineB := stripANSI(renderDiffLine(dl, 3, highlightedLine{}, "unstaged", 10, 10))
+	lineC := stripANSI(renderDiffLine(dl, 3, highlightedLine{}, "unstaged", 20, 10))
+
+	partA := strings.SplitN(lineA, " + ", 2)
+	partB := strings.SplitN(lineB, " + ", 2)
+	partC := strings.SplitN(lineC, " + ", 2)
+	if len(partA) != 2 || len(partB) != 2 || len(partC) != 2 {
+		t.Fatalf("expected added-line marker in clipped output: %q | %q | %q", lineA, lineB, lineC)
+	}
+
+	got := partA[1] + partB[1] + partC[1]
+	if got != dl.Content {
+		t.Fatalf("horizontal clipping lost content: got %q want %q", got, dl.Content)
+	}
+}
+
+func TestRenderDiffLine_HorizontalClipping_TabNormalized(t *testing.T) {
+	dl := DiffLine{Type: LineAdded, NewNum: 1, Content: "\tif\tvalue > 0 {\treturn}"}
+	want := normalizeLineContent(dl.Content)
+
+	lineA := stripANSI(renderDiffLine(dl, 3, highlightedLine{}, "unstaged", 0, 12))
+	lineB := stripANSI(renderDiffLine(dl, 3, highlightedLine{}, "unstaged", 12, 12))
+	lineC := stripANSI(renderDiffLine(dl, 3, highlightedLine{}, "unstaged", 24, 12))
+
+	partA := strings.SplitN(lineA, " + ", 2)
+	partB := strings.SplitN(lineB, " + ", 2)
+	partC := strings.SplitN(lineC, " + ", 2)
+	if len(partA) != 2 || len(partB) != 2 || len(partC) != 2 {
+		t.Fatalf("expected added-line marker in clipped output: %q | %q | %q", lineA, lineB, lineC)
+	}
+
+	got := partA[1] + partB[1] + partC[1]
+	if got != want {
+		t.Fatalf("tab-normalized clipping lost content: got %q want %q", got, want)
 	}
 }
 
@@ -860,8 +1030,23 @@ func TestRenderScrollbar_FocusStateChangesStyle(t *testing.T) {
 	}
 }
 
+func TestRenderHScrollbar_NoScrollNeeded(t *testing.T) {
+	result := renderHScrollbar(20, 10, 0, false)
+	if result != "" {
+		t.Error("should return empty when horizontal content fits")
+	}
+}
+
+func TestRenderHScrollbar_ThumbMovesWithOffset(t *testing.T) {
+	left := renderHScrollbar(20, 100, 0, false)
+	right := renderHScrollbar(20, 100, 80, false)
+	if left == right {
+		t.Error("horizontal scrollbar should change with offset")
+	}
+}
+
 func TestRenderPane_UsesScrollbarOnBorderColumn(t *testing.T) {
-	pane := renderPane(" pane ", "abc\ndef", "█\n", 5, 4, false)
+	pane := renderPane(" pane ", "abc\ndef", "█\n", "", 5, 4, false)
 	lines := strings.Split(stripANSI(pane), "\n")
 	if got := lines[1]; got != "│abc█" {
 		t.Fatalf("first body row = %q, want %q", got, "│abc█")
@@ -872,13 +1057,21 @@ func TestRenderPane_UsesScrollbarOnBorderColumn(t *testing.T) {
 }
 
 func TestRenderPane_UsesBorderWhenNoScrollbar(t *testing.T) {
-	pane := renderPane(" pane ", "abc\ndef", "", 5, 4, false)
+	pane := renderPane(" pane ", "abc\ndef", "", "", 5, 4, false)
 	lines := strings.Split(stripANSI(pane), "\n")
 	if got := lines[1]; got != "│abc│" {
 		t.Fatalf("first body row = %q, want %q", got, "│abc│")
 	}
 	if got := lines[2]; got != "│def│" {
 		t.Fatalf("second body row = %q, want %q", got, "│def│")
+	}
+}
+
+func TestRenderPane_UsesHorizontalScrollbarOnBottomBorder(t *testing.T) {
+	pane := renderPane(" pane ", "abc\ndef", "", "══█═", 6, 4, false)
+	lines := strings.Split(stripANSI(pane), "\n")
+	if got := lines[3]; got != "└══█═┘" {
+		t.Fatalf("bottom row = %q, want %q", got, "└══█═┘")
 	}
 }
 
