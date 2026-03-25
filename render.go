@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 var (
@@ -24,6 +25,9 @@ const (
 	scrollThumbCharActive = "▐"
 	scrollTrackChar       = "│"
 	scrollTrackCharActive = "┃"
+	scrollHThumbChar      = "▄"
+	scrollHTrackChar      = "─"
+	scrollHTrackCharAct   = "━"
 )
 
 // renderScrollbar renders a vertical scrollbar column of the given height.
@@ -54,6 +58,35 @@ func renderScrollbar(height, total, offset int, active bool) string {
 		}
 		if i >= thumbPos && i < thumbPos+thumbSize {
 			sb.WriteString(thumbStyle.Render(thumbChar))
+		} else {
+			sb.WriteString(trackStyle.Render(trackChar))
+		}
+	}
+	return sb.String()
+}
+
+func renderHScrollbar(width, total, offset int, active bool) string {
+	if total <= width || width <= 0 {
+		return ""
+	}
+
+	thumbSize := max(1, width*width/total)
+	maxOffset := total - width
+	thumbPos := offset * (width - thumbSize) / maxOffset
+
+	thumbStyle := styleScrollThumb
+	trackStyle := styleScrollTrack
+	trackChar := scrollHTrackChar
+	if active {
+		thumbStyle = styleScrollThumbActive
+		trackStyle = styleScrollTrackActive
+		trackChar = scrollHTrackCharAct
+	}
+
+	var sb strings.Builder
+	for i := range width {
+		if i >= thumbPos && i < thumbPos+thumbSize {
+			sb.WriteString(thumbStyle.Render(scrollHThumbChar))
 		} else {
 			sb.WriteString(trackStyle.Render(trackChar))
 		}
@@ -115,12 +148,18 @@ func truncateRight(s string, maxWidth int) string {
 	return s[:maxWidth-1] + "…"
 }
 
+func normalizeLineContent(s string) string {
+	// Keep horizontal clipping predictable regardless of terminal tab-stop settings.
+	return strings.ReplaceAll(s, "\t", "    ")
+}
+
 func (m *model) buildDiffContent() string {
 	if len(m.files) == 0 {
 		vpWidth := m.vpWidth()
 		vpHeight := m.paneBodyHeight()
 		m.fileOffsets = nil
 		m.hunkRefs = nil
+		m.maxDiffXOffset = 0
 		return lipgloss.NewStyle().
 			Width(vpWidth).
 			Height(vpHeight).
@@ -131,6 +170,7 @@ func (m *model) buildDiffContent() string {
 	var sb strings.Builder
 	m.fileOffsets = make([]int, len(m.files))
 	m.hunkRefs = nil
+	m.maxDiffXOffset = 0
 	lineNum := 0
 
 	for i, f := range m.files {
@@ -183,30 +223,34 @@ func (m *model) buildDiffContent() string {
 		seenContent := false
 
 		for j, dl := range f.Lines {
+			ref := hunkRef{i, -1}
 			var section string
 			switch dl.Type {
 			case LineHeader:
 				if seenContent {
 					hunkIdx++
 				}
-				m.hunkRefs = append(m.hunkRefs, hunkRef{i, -1})
 			case LineSeparator:
 				hunkIdx++
-				m.hunkRefs = append(m.hunkRefs, hunkRef{i, -1})
 				// Use section of the next hunk for the separator line.
 				if hunkIdx < len(f.Hunks) {
 					section = f.Hunks[hunkIdx].Section
 				}
 			default:
 				seenContent = true
-				m.hunkRefs = append(m.hunkRefs, hunkRef{i, hunkIdx})
+				ref = hunkRef{i, hunkIdx}
 				if hunkIdx < len(f.Hunks) {
 					section = f.Hunks[hunkIdx].Section
 				}
 			}
 
-			sb.WriteString(renderDiffLine(dl, numWidth, highlighted[j], section))
+			visibleContent := normalizeLineContent(dl.Content)
+			contentWidth := max(1, vpWidth-(numWidth+5))
+			m.maxDiffXOffset = max(m.maxDiffXOffset, max(0, lipgloss.Width(visibleContent)-contentWidth))
+
+			sb.WriteString(renderDiffLine(dl, numWidth, highlighted[j], section, m.diffXOffset, contentWidth))
 			sb.WriteByte('\n')
+			m.hunkRefs = append(m.hunkRefs, ref)
 			lineNum++
 		}
 	}
@@ -214,7 +258,28 @@ func (m *model) buildDiffContent() string {
 	return sb.String()
 }
 
-func renderDiffLine(dl DiffLine, numWidth int, hl highlightedLine, section string) string {
+func clipStyledContent(content, styled string, xOffset, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	total := lipgloss.Width(content)
+	if total <= 0 {
+		return ""
+	}
+	if xOffset < 0 {
+		xOffset = 0
+	}
+	if xOffset >= total {
+		return ""
+	}
+	left := xOffset
+	right := min(total, left+width)
+	return ansi.Cut(styled, left, right)
+}
+
+func renderDiffLine(dl DiffLine, numWidth int, hl highlightedLine, section string, xOffset, contentWidth int) string {
+	content := normalizeLineContent(dl.Content)
+
 	// Gutter staging indicator: S (staged) or M (unstaged), only on changed lines.
 	var indicator string
 	if dl.Type == LineAdded || dl.Type == LineRemoved {
@@ -234,15 +299,19 @@ func renderDiffLine(dl DiffLine, numWidth int, hl highlightedLine, section strin
 	case LineSeparator:
 		return indicator + styleGutter.Render(fmt.Sprintf(" %*s   ", numWidth, "…"))
 	case LineContext:
-		return indicator + styleGutter.Render(fmt.Sprintf(" %*d   ", numWidth, dl.NewNum)) + renderHighlighted(hl, dl.Content)
+		prefix := indicator + styleGutter.Render(fmt.Sprintf(" %*d   ", numWidth, dl.NewNum))
+		return prefix + clipStyledContent(content, renderHighlighted(hl, content), xOffset, contentWidth)
 	case LineAdded:
-		return indicator + styleGutter.Render(fmt.Sprintf(" %*d + ", numWidth, dl.NewNum)) + renderHighlightedWithBG(hl, dl.Content, lipgloss.Color("22"))
+		prefix := indicator + styleGutter.Render(fmt.Sprintf(" %*d + ", numWidth, dl.NewNum))
+		return prefix + clipStyledContent(content, renderHighlightedWithBG(hl, content, lipgloss.Color("22")), xOffset, contentWidth)
 	case LineRemoved:
-		return indicator + styleGutter.Render(fmt.Sprintf(" %*d - ", numWidth, dl.OldNum)) + renderHighlightedWithBG(hl, dl.Content, lipgloss.Color("52"))
+		prefix := indicator + styleGutter.Render(fmt.Sprintf(" %*d - ", numWidth, dl.OldNum))
+		return prefix + clipStyledContent(content, renderHighlightedWithBG(hl, content, lipgloss.Color("52")), xOffset, contentWidth)
 	case LineHeader:
 		return styleGutter.Render(fmt.Sprintf("  %*s   ", numWidth, "…"))
 	case LineBinary:
-		return indicator + styleGutter.Render(fmt.Sprintf(" %*s   ", numWidth, "")) + styleFaint.Render(dl.Content)
+		prefix := indicator + styleGutter.Render(fmt.Sprintf(" %*s   ", numWidth, ""))
+		return prefix + clipStyledContent(content, styleFaint.Render(content), xOffset, contentWidth)
 	default:
 		return ""
 	}
@@ -267,14 +336,14 @@ func (m model) renderStatus() string {
 	case focusCommits:
 		hint = paneHint + " | enter: select | tab: next | q: quit"
 	case focusDiff:
-		parts := []string{paneHint, "s: stage hunk", "tab: files", "j/k ↑↓  ^f/^b: page", "q: quit"}
+		parts := []string{paneHint, "s: stage hunk", "scroll: h/l ←→  j/k ↑↓  ^f/^b page", "tab: files", "q: quit"}
 		hint = strings.Join(parts, " | ")
 	}
 
 	return styleBar.Width(m.width).Render(styleBar.Render(" " + hint))
 }
 
-func renderPane(title, body, rightOverlay string, width, height int, active bool) string {
+func renderPane(title, body, rightOverlay, bottomOverlay string, width, height int, active bool) string {
 	width = max(2, width)
 	height = max(2, height)
 	innerWidth := max(1, width-2)
@@ -292,7 +361,15 @@ func renderPane(title, body, rightOverlay string, width, height int, active bool
 	top := borderStyle.Render("┌") +
 		titleStyle.Render(titleText) +
 		borderStyle.Render(strings.Repeat("─", topFill)+"┐")
-	bottom := borderStyle.Render("└" + strings.Repeat("─", innerWidth) + "┘")
+	bottomInner := borderStyle.Render(strings.Repeat("─", innerWidth))
+	if bottomOverlay != "" {
+		overlay := ansi.Truncate(bottomOverlay, innerWidth, "")
+		if w := lipgloss.Width(overlay); w < innerWidth {
+			overlay += borderStyle.Render(strings.Repeat("─", innerWidth-w))
+		}
+		bottomInner = overlay
+	}
+	bottom := borderStyle.Render("└") + bottomInner + borderStyle.Render("┘")
 
 	bodyLines := strings.Split(body, "\n")
 	overlayLines := strings.Split(rightOverlay, "\n")

@@ -94,6 +94,8 @@ type model struct {
 	lastLogSHA     string    // HEAD SHA at last commit-log fetch; skip Log() when unchanged
 	fileOffsets    []int     // line offset where each file starts in the viewport
 	hunkRefs       []hunkRef // maps viewport lines to file+hunk indices
+	diffXOffset    int
+	maxDiffXOffset int
 	liveResult     *DiffResult
 	commits        []CommitInfo
 	commitCursor   int // 0 = "working tree", 1+ = commits[i-1]
@@ -395,7 +397,14 @@ func (m *model) rebuildDiffContent() {
 	if m.lastBuiltGen == m.diffGen && m.diffGen > 0 {
 		return
 	}
+	if m.diffXOffset < 0 {
+		m.diffXOffset = 0
+	}
 	content := m.buildDiffContent()
+	if m.diffXOffset > m.maxDiffXOffset {
+		m.diffXOffset = m.maxDiffXOffset
+		content = m.buildDiffContent()
+	}
 	m.viewport.SetContent(content)
 	m.lastBuiltGen = m.diffGen
 }
@@ -696,6 +705,10 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.diffScroll(func(v *viewport.Model) { v.ViewDown() })
 	case "ctrl+b":
 		m.diffScroll(func(v *viewport.Model) { v.ViewUp() })
+	case "h", "left":
+		m.diffScrollHorizontal(-m.diffKeyStep())
+	case "l", "right":
+		m.diffScrollHorizontal(m.diffKeyStep())
 	case "enter":
 		return m.keyOpen()
 	case "s":
@@ -804,6 +817,32 @@ func (m *model) diffScroll(fn func(*viewport.Model)) {
 	}
 }
 
+func (m *model) diffScrollHorizontal(delta int) {
+	if m.focus != focusDiff || len(m.files) == 0 || delta == 0 {
+		return
+	}
+	next := m.diffXOffset + delta
+	if next < 0 {
+		next = 0
+	}
+	if next > m.maxDiffXOffset {
+		next = m.maxDiffXOffset
+	}
+	if next == m.diffXOffset {
+		return
+	}
+	m.diffXOffset = next
+	yOff := m.viewport.YOffset
+	m.diffGen++
+	m.lastBuiltGen = 0
+	m.rebuildDiffContent()
+	m.viewport.SetYOffset(yOff)
+}
+
+func (m model) diffKeyStep() int {
+	return 8
+}
+
 func (m *model) previewCommit(idx int, focusFilesPane bool) tea.Cmd {
 	if idx < 0 || idx >= len(m.commits) {
 		return nil
@@ -883,9 +922,23 @@ func (m model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			m.dragging = false
 		}
 	case tea.MouseButtonWheelUp:
+		if msg.Shift {
+			m.handleMouseScrollHorizontal(msg, -1)
+			return m, nil
+		}
 		return m, m.handleMouseScroll(msg, -1)
 	case tea.MouseButtonWheelDown:
+		if msg.Shift {
+			m.handleMouseScrollHorizontal(msg, 1)
+			return m, nil
+		}
 		return m, m.handleMouseScroll(msg, 1)
+	case tea.MouseButtonWheelLeft:
+		m.handleMouseScrollHorizontal(msg, -1)
+		return m, nil
+	case tea.MouseButtonWheelRight:
+		m.handleMouseScrollHorizontal(msg, 1)
+		return m, nil
 	}
 	return m, nil
 }
@@ -1049,6 +1102,28 @@ func (m *model) handleMouseScroll(msg tea.MouseMsg, dir int) tea.Cmd {
 	return m.scrollCommitList(dir)
 }
 
+func (m *model) handleMouseScrollHorizontal(msg tea.MouseMsg, dir int) {
+	if dir == 0 {
+		return
+	}
+
+	row := msg.Y - headerHeight
+	if row < 0 || row >= m.mainHeight() {
+		return
+	}
+	if msg.X < m.sidebarPaneWidth() {
+		return
+	}
+
+	bodyRow := row - 1
+	if bodyRow < 0 || bodyRow >= m.paneBodyHeight() {
+		return
+	}
+
+	m.focus = focusDiff
+	m.diffScrollHorizontal(dir * m.diffKeyStep())
+}
+
 func (m *model) scrollCommitList(dir int) tea.Cmd {
 	total := len(m.commits) + 1
 	commitH := m.commitListHeight()
@@ -1145,18 +1220,20 @@ func (m model) View() string {
 	diffScrollbar := renderScrollbar(diffBodyH, totalDiffLines, m.viewport.YOffset, m.focus == focusDiff)
 
 	fileScrollbar := renderScrollbar(fileH, len(m.tree), m.sidebarOffset, m.focus == focusFiles)
-	filePane := renderPane(m.paneTitle(focusFiles), m.renderFileTree(fileH), fileScrollbar, m.sidebarPaneWidth(), fileH+paneBorderSize, m.focus == focusFiles)
+	filePane := renderPane(m.paneTitle(focusFiles), m.renderFileTree(fileH), fileScrollbar, "", m.sidebarPaneWidth(), fileH+paneBorderSize, m.focus == focusFiles)
 
 	var commitPane string
 	if msgH > 0 {
-		commitPane = renderPane(m.paneTitle(focusCommitMsg), m.renderCommitInput(), "", m.sidebarPaneWidth(), msgH+paneBorderSize, m.focus == focusCommitMsg)
+		commitPane = renderPane(m.paneTitle(focusCommitMsg), m.renderCommitInput(), "", "", m.sidebarPaneWidth(), msgH+paneBorderSize, m.focus == focusCommitMsg)
 	}
 
 	commitScrollbar := renderScrollbar(commitH, len(m.commits)+1, m.commitOffset, m.focus == focusCommits)
 	historyFocused := m.focus == focusCommits
-	historyPane := renderPane(m.paneTitle(focusCommits), m.renderHistoryBody(commitH), commitScrollbar, m.sidebarPaneWidth(), commitH+paneBorderSize, historyFocused)
+	historyPane := renderPane(m.paneTitle(focusCommits), m.renderHistoryBody(commitH), commitScrollbar, "", m.sidebarPaneWidth(), commitH+paneBorderSize, historyFocused)
 
-	diffPane := renderPane(m.paneTitle(focusDiff), content, diffScrollbar, m.width-m.sidebarPaneWidth(), mainH, m.focus == focusDiff)
+	diffTotalWidth := m.vpWidth() + m.maxDiffXOffset
+	diffHScrollbar := renderHScrollbar(m.vpWidth(), diffTotalWidth, m.diffXOffset, m.focus == focusDiff)
+	diffPane := renderPane(m.paneTitle(focusDiff), content, diffScrollbar, diffHScrollbar, m.width-m.sidebarPaneWidth(), mainH, m.focus == focusDiff)
 	sidebarPanes := []string{filePane}
 	if commitPane != "" {
 		sidebarPanes = append(sidebarPanes, commitPane)
