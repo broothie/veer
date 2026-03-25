@@ -98,14 +98,14 @@ veer -d                 # enable debug logging to ~/.veer/debug.log
 - [x] Continuous scroll
 - [x] Refactor everything
 - [ ] Expandable ellipsis
-- [ ] Sticky file headers
+- [x] Sticky file headers
 - [x] Rethink keybinds
 - [x] Hunk/file staging and committing
 - [ ] Dynamic sidebar width based on window size
 - [x] Flag to disable syntax highlighting
 - [x] Fix version flag output (`veer -v` currently prints `dev`)
 - [x] Fix header truncation
-- [ ] Fix line wrapping
+- [x] Fix line wrapping
 - [x] Fix pane borders
 - [ ] Fix line numbers changing upon file/hunk staging
 - [x] Add linux to goreleaser
