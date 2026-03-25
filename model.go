@@ -501,11 +501,8 @@ func (m *model) toggleStage() tea.Cmd {
 	if !m.isWorkingTree() || m.repoRoot == "" {
 		return nil
 	}
-	switch m.focus {
-	case focusFiles:
+	if m.focus == focusFiles {
 		return m.toggleStageFile()
-	case focusDiff:
-		return m.stageCurrentHunk()
 	}
 	return nil
 }

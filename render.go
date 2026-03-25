@@ -336,7 +336,7 @@ func (m model) renderStatus() string {
 	case focusCommits:
 		hint = paneHint + " | enter: select | tab: next | q: quit"
 	case focusDiff:
-		parts := []string{paneHint, "s: stage hunk", "scroll: h/l ←→  j/k ↑↓  ^f/^b page", "tab: files", "q: quit"}
+		parts := []string{paneHint, "scroll: h/l ←→  j/k ↑↓  ^f/^b page", "tab: files", "q: quit"}
 		hint = strings.Join(parts, " | ")
 	}
 
